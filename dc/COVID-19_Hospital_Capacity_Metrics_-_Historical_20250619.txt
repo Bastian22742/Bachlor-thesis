@@ -1,3 +1,0 @@
-t1.ICU Beds in Use - Total > t1.ICU Beds - Total Capacity
-t1.Ventilators in Use - Total > t1.Ventilators - Total Capacity
-t1.Date = t2.Date
