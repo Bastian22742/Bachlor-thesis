@@ -40,3 +40,4 @@ result/
 ├── xxx_result.td
 ├──xxx_treewidth.txt
 └── xxx_solution_conflict_graph.gr
+---
