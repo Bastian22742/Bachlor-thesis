@@ -24,7 +24,7 @@ public class Main {
         }
         String get(String k){ return map.get(k); }
     }
-    /* Denial Constraint construct*/
+    /* Denial Constraint construct from dc Folie*/
     static class DCAtom{
         String lAttr, op, rAttr, constVal;
         boolean isConst, sameTuple;            // sameTuple=true → t1.A operation t1.B
@@ -73,7 +73,7 @@ public class Main {
         return list;
     }
 
-    /* check funktion,check the fd*/
+    /* check funktion,check whether the data violate the fd*/
     static boolean violatesFD(List<String> lhs,String rhs,Fact f1,Fact f2){
         for(String a: lhs){
             String v1=f1.get(a), v2=f2.get(a);
@@ -83,12 +83,10 @@ public class Main {
         return r1!=null && r2!=null && !r1.equals(r2);
     }
 
-    /* check funktion,check the fd*/
+    /* read dc from Class DCatom */
     static List<List<DCAtom>> readDC(Path dc) throws IOException{
         List<List<DCAtom>> dcs=new ArrayList<>();
         if(!Files.exists(dc)) return dcs;
-
-
         Pattern pat = Pattern.compile(
                 "t1\\.([A-Za-z0-9_ ()%-]+)([!=><]{1,2})(?:t2\\.([A-Za-z0-9_ ()%-]+)|t1\\.([A-Za-z0-9_ ()%-]+)|([0-9.]+)|\"([^\"]+)\")"
         );
@@ -96,9 +94,9 @@ public class Main {
         try(BufferedReader br=Files.newBufferedReader(dc)){
             String l;
             while((l=br.readLine())!=null){
-                l=l.replaceAll("\\s+","");           // 去空白
+                l=l.replaceAll("\\s+","");           // delete the empty variante
                 if(l.isEmpty()||l.startsWith("#")) continue;
-                if(l.startsWith("¬(")) l=l.substring(2,l.length()-1); // 去掉 ¬( )
+                if(l.startsWith("¬(")) l=l.substring(2,l.length()-1); // delete ¬(...)
                 List<DCAtom> clause=new ArrayList<>();
                 for(String at:l.split("&&")){
                     Matcher m=pat.matcher(at);
@@ -119,10 +117,12 @@ public class Main {
         }
         return dcs;
     }
+    /* Its just Number compare function,some number in CSV are typ: String,we need to compare them, So we construct one */
     static int cmpNum(String a,String b){
         try{ return Double.compare(Double.parseDouble(a),Double.parseDouble(b)); }
         catch(Exception e){ return a.compareTo(b); }
     }
+    /* Its just Compare function for DC compare */
     static boolean sat(DCAtom a,Fact f1,Fact f2){
         String v1=f1.get(a.lAttr); if(v1==null) return false;
         if(a.isConst){
@@ -146,14 +146,15 @@ public class Main {
             };
         }
     }
+    /* Its a function to check whether the data violate dc  */
     static boolean violatesDC(List<DCAtom> clause,Fact f1,Fact f2){
         for(DCAtom a: clause) if(!sat(a,f1,f2)) return false;
         return true;
     }
-
+    /* get the query from query folie,and find the data which is pass to the query */
     static Set<Integer> queryIdx(List<Fact> facts,Path q) throws IOException{
         Set<Integer> idx=new HashSet<>();
-        if(!Files.exists(q)) return idx;
+        if(!Files.exists(q)) return idx;// read all constraint from query foile
         Map<String,Set<String>> cond=new HashMap<>();
         try(BufferedReader br=Files.newBufferedReader(q)){
             String l;
@@ -164,7 +165,7 @@ public class Main {
                         new HashSet<>(Arrays.asList(p[1].trim().split(","))));
             }
         }
-        for(int i=0;i<facts.size();i++){
+        for(int i=0;i<facts.size();i++){// go through all fact here
             Fact f=facts.get(i); boolean ok=true;
             for(String k:cond.keySet()){
                 String v=f.get(k);
@@ -174,7 +175,7 @@ public class Main {
         }
         return idx;
     }
-
+    /* construct the conflict graph */
     static void writeGr(List<Fact> facts,
                         List<Map.Entry<List<String>,String>> fds,
                         List<List<DCAtom>> dcs,
@@ -186,7 +187,7 @@ public class Main {
 
         List<int[]> edges=new ArrayList<>();
 
-        for(int i=0;i<tg.size();i++){
+        for(int i=0;i<tg.size();i++){ //construct the conflict edges
             for(int j=i+1;j<tg.size();j++){
                 Fact f1=tg.get(i), f2=tg.get(j);
                 boolean conf=false;
@@ -248,7 +249,7 @@ public class Main {
             List<Fact> facts = readFacts(csv.toPath());
             var fds = readFD(Path.of(FD_DIR, base + ".fd"));
             var dcs = readDC(Path.of(DC_DIR, base + ".dc"));
-            var q   = queryIdx(facts, Path.of(QUERY_DIR, base + ".query"));
+            var q   = queryIdx(facts, Path.of(QUERY_DIR, base + ".query"));//all facts which is passed to query condtion
 
 
             Path g = Path.of(OUT_DIR, base + "_conflict_graph.gr");
@@ -261,7 +262,7 @@ public class Main {
                     Path.of(OUT_DIR, base + "_treewidth.txt"));
 
             if(!q.isEmpty()){
-                Path sg = Path.of(OUT_DIR,
+                Path sg = Path.of(OUT_DIR,//if find at least 1 result rely on query condition
                         base + "_solution_conflict_graph.gr");
                 writeGr(facts, fds, dcs, sg, q);
             }
