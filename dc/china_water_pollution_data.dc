@@ -1,0 +1,1 @@
+t1.Province = t2.Province && t1.City != t2.City

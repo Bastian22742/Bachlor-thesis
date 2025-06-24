@@ -1,0 +1,4 @@
+t1.id = t2.id && t1.role != t2.role
+
+
+

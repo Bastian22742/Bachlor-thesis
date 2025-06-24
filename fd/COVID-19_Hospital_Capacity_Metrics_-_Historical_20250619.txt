@@ -1,0 +1,1 @@
+ICU Beds in Use - COVID-19,Acute Non-ICU Beds in Use - COVID-19 -> Combined Hospital Beds in Use - COVID-19

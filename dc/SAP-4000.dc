@@ -1,0 +1,3 @@
+t1.Gender = t2.Gender && t1.Attendance(%) != t2.Attendance(%)
+
+
