@@ -29,7 +29,7 @@ public class Main {
     private static final String CSV_DIR   = "./csv_inputs";
     private static final String FD_DIR    = "./fd";
     private static final String DC_DIR    = "./dc";
-    private static final String QUERY_DIR = "./query";
+    private static final String QUERY_DIR = "./q";
     private static final String OUT_DIR   = "./result";
 
     /* ---------- Fact ---------- */
@@ -279,23 +279,27 @@ public class Main {
                         List<Set<Integer>> solutionEdges) throws IOException{
 
         List<Fact> tg = facts;
-        List<Integer> map = null;
 
         List<int[]> edges = new ArrayList<>();
-
+        System.out.println("FDs size: " + fds.size());
+        System.out.println("DCs size: " + dcs.size());
         // 冲突边
         for(int i = 0; i < tg.size(); i++){
-            for(int j = i+1; j < tg.size(); j++){
+            for(int j = i + 1; j < tg.size(); j++){
                 Fact f1 = tg.get(i), f2 = tg.get(j);
                 boolean conf = false;
 
                 for(var fd : fds){
                     if(violatesFD(fd.getKey(), fd.getValue(), f1, f2)){ conf = true; break; }
                 }
-                if(!conf){
-                    for(var dc : dcs){
-                        if(violatesDC(dc, f1, f2)){ conf = true; break; }
-                    }
+                if(conf){
+                    int id1 = i+1;
+                    int id2 = j+1;
+                    edges.add(new int[]{id1, id2});
+                }
+
+                for(var dc : dcs){
+                    if(violatesDC(dc, f1, f2)){ conf = true; break; }
                 }
                 if(conf){
                     int id1 = i+1;
@@ -303,7 +307,6 @@ public class Main {
                     edges.add(new int[]{id1, id2});
                 }
             }
-        System.out.println("Final Result: " + edges);
         }
 
         // 解决方案边 (极小满足集)
@@ -341,7 +344,7 @@ public class Main {
             var fds = readFD(Path.of(FD_DIR, base + ".fd"));
             var dcs = readDC(Path.of(DC_DIR, base + ".dc"));
 
-            List<Set<Integer>> solutionEdges = findMinimalSatisfyingSets(facts, Path.of(QUERY_DIR, base + ".query"));
+            List<Set<Integer>> solutionEdges = findMinimalSatisfyingSets(facts, Path.of(QUERY_DIR, base + ".q"));
 
             Path g = Path.of(OUT_DIR, base + "_solution_conflict_graph.gr");
             writeGr(facts, fds, dcs, g, solutionEdges);
@@ -352,7 +355,6 @@ public class Main {
         }
     }
 }
-
 
 
 
