@@ -122,13 +122,13 @@ public class Main {
         List<List<DCAtom>> dcs=new ArrayList<>();
         if(!Files.exists(dc)) return dcs;
 
-        // 修复正则表达式，改善解析
+        // 改进的正则表达式，支持带空格和特殊字符的属性名
         Pattern pat = Pattern.compile(
-                "(t[12])\\.([^\\s!=><]+)\\s*([!=><]+)\\s*" +
-                "(?:(t[12])\\.([^\\s!=><]+)|" +  // 另一个元组的属性
-                "([0-9.-]+)|" +                  // 数字常量
-                "\"([^\"]*)\"|" +               // 双引号字符串
-                "'([^']*)')"                    // 单引号字符串
+                "(t[12])\\.((?:\"[^\"]*\"|'[^']*'|[^\\s!=><&]+(?:\\s+[^\\s!=><&]+)*))\\s*([!=><]+)\\s*" +
+                        "(?:(t[12])\\.((?:\"[^\"]*\"|'[^']*'|[^\\s!=><&]+(?:\\s+[^\\s!=><&]+)*))|" +  // 另一个元组的属性
+                        "([0-9.-]+)|" +                  // 数字常量
+                        "\"([^\"]*)\"|" +               // 双引号字符串
+                        "'([^']*)')"                    // 单引号字符串
         );
 
         try(BufferedReader br=Files.newBufferedReader(dc)){
@@ -143,8 +143,6 @@ public class Main {
                     processed = processed.substring(2, processed.length()-1);
                 }
 
-                System.out.println("Processing DC: " + original);
-                System.out.println("After preprocessing: " + processed);
 
                 List<DCAtom> clause=new ArrayList<>();
 
@@ -157,31 +155,26 @@ public class Main {
 
                     if(m.find()) {
                         String leftTuple = m.group(1);    // t1 或 t2
-                        String leftAttr = m.group(2);     // 属性名
+                        String leftAttr = cleanAttributeName(m.group(2));     // 属性名
                         String op = m.group(3);           // 操作符
 
-                        System.out.println("  Found atom - " + leftTuple + "." + leftAttr + " " + op);
 
                         if(m.group(4) != null) {          // 右边是另一个元组的属性
                             String rightTuple = m.group(4);
-                            String rightAttr = m.group(5);
+                            String rightAttr = cleanAttributeName(m.group(5));
                             boolean sameTuple = leftTuple.equals(rightTuple);
-                            System.out.println("    Right: " + rightTuple + "." + rightAttr + " (same tuple: " + sameTuple + ")");
                             clause.add(new DCAtom(leftAttr, op, rightAttr, false, sameTuple));
                         }
                         else if(m.group(6) != null) {     // 数字常量
                             String constVal = m.group(6);
-                            System.out.println("    Constant (numeric): " + constVal);
                             clause.add(new DCAtom(leftAttr, op, constVal, true, false));
                         }
                         else if(m.group(7) != null) {     // 双引号字符串常量
                             String constVal = m.group(7);
-                            System.out.println("    Constant (string): \"" + constVal + "\"");
                             clause.add(new DCAtom(leftAttr, op, constVal, true, false));
                         }
                         else if(m.group(8) != null) {     // 单引号字符串常量
                             String constVal = m.group(8);
-                            System.out.println("    Constant (string): '" + constVal + "'");
                             clause.add(new DCAtom(leftAttr, op, constVal, true, false));
                         }
                     } else {
@@ -199,6 +192,18 @@ public class Main {
         }
         System.out.println("Total DCs loaded: " + dcs.size());
         return dcs;
+    }
+
+    // 清理属性名：去掉引号，处理空格
+    static String cleanAttributeName(String attr) {
+        if (attr == null) return null;
+        attr = attr.trim();
+        // 去掉外层引号
+        if ((attr.startsWith("\"") && attr.endsWith("\"")) ||
+                (attr.startsWith("'") && attr.endsWith("'"))) {
+            attr = attr.substring(1, attr.length() - 1);
+        }
+        return attr.trim();
     }
 
     static int cmpNum(String a,String b){
@@ -290,7 +295,7 @@ public class Main {
                             String trimmedVal = val.trim();
                             // 去掉引号
                             if((trimmedVal.startsWith("\"") && trimmedVal.endsWith("\"")) ||
-                               (trimmedVal.startsWith("'") && trimmedVal.endsWith("'"))) {
+                                    (trimmedVal.startsWith("'") && trimmedVal.endsWith("'"))) {
                                 trimmedVal = trimmedVal.substring(1, trimmedVal.length()-1);
                             }
                             if(!trimmedVal.isEmpty()) {
@@ -333,8 +338,8 @@ public class Main {
     }
 
     static void generateCombinations(List<Fact> facts, Map<String, Set<String>> queryConditions,
-                                   int targetSize, int startIndex, List<Integer> current,
-                                   List<Set<Integer>> results){
+                                     int targetSize, int startIndex, List<Integer> current,
+                                     List<Set<Integer>> results){
         if(current.size() == targetSize){
             if(satisfiesAllConditions(facts, current, queryConditions)){
                 results.add(new HashSet<>(current));
@@ -350,7 +355,7 @@ public class Main {
     }
 
     static boolean satisfiesAllConditions(List<Fact> facts, List<Integer> indices,
-                                        Map<String, Set<String>> queryConditions){
+                                          Map<String, Set<String>> queryConditions){
         // 对每个查询条件，检查选定的事实是否至少有一个满足该条件
         for(String attribute : queryConditions.keySet()){
             Set<String> requiredValues = queryConditions.get(attribute);
@@ -407,7 +412,6 @@ public class Main {
                 for(var fd : fds){
                     if(violatesFD(fd.getKey(), fd.getValue(), f1, f2)){
                         hasConflict = true;
-                        System.out.println("    FD violation between fact " + i + " and " + j);
                         break;
                     }
                 }
@@ -417,7 +421,6 @@ public class Main {
                     for(var dc : dcs){
                         if(violatesDC(dc, f1, f2)){
                             hasConflict = true;
-                            System.out.println("    DC violation between fact " + i + " and " + j);
                             break;
                         }
                     }
@@ -484,8 +487,6 @@ public class Main {
                 bw.newLine();
             }
         }
-
-        System.out.println("Solution-conflict graph written to: " + out);
     }
 
     /* ---------- Main ---------- */
@@ -511,7 +512,7 @@ public class Main {
 
             // 查找极小满足集
             List<Set<Integer>> minimalSatisfyingSets = findMinimalSatisfyingSets(
-                facts, Path.of(QUERY_DIR, baseName + ".q"));
+                    facts, Path.of(QUERY_DIR, baseName + ".q"));
 
             System.out.println("Found " + minimalSatisfyingSets.size() + " minimal satisfying sets");
 
@@ -529,5 +530,3 @@ public class Main {
         System.out.println("\nAll files processed successfully!");
     }
 }
-
-

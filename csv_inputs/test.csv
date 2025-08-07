@@ -1,0 +1,10 @@
+StudentID,StudentName,Course,Grade,Credits,Prerequisite
+1,Alice,CS101,A,3,None
+2,Alice,MATH101,B,3,None
+3,Alice,CS201,A,4,CS101
+4,Bob,CS101,B,3,None
+5,Bob,MATH101,A,3,None
+6,Bob,PHYS101,B,3,None
+7,Charlie,CS101,A,3,None
+8,Charlie,MATH101,C,3,None
+9,Alice,PHYS101,A,3,None

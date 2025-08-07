@@ -1,3 +1,0 @@
-t1.variance = t2.variance && t1.class != t2.class
-t1.skewness = t2.skewness && t1.curtosis = t2.curtosis && t1.entropy != t2.entropy
-t1.variance = t2.variance && t1.skewness = t2.skewness && t1.curtosis = t2.curtosis && t1.entropy = t2.entropy && t1.class != t2.class
