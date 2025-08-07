@@ -1,1 +1,1 @@
-Treewidth = 0
+Treewidth = 2

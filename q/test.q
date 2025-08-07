@@ -1,2 +1,3 @@
 StudentName = Alice
-SUM(Credits) > 6
+Course = CS101, CS201
+Grade = A

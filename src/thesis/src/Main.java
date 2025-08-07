@@ -28,17 +28,27 @@ public class Main {
 
     /* ---------- DC Atom ---------- */
     static class DCAtom{
-        String lAttr, op, rAttr, constVal;
-        boolean isConst, sameTuple;            // sameTuple=true → t1.A op t1.B
-        // t1.A op t2.B
-        DCAtom(String l,String o,String r){
-            lAttr=l; op=o; rAttr=r;
-            isConst=false; sameTuple=false;
+        String lTuple, lAttr, op, rTuple, rAttr, constVal;
+        boolean isConst;
+
+        // t1.A op t2.B 或 t1.A op t1.B
+        DCAtom(String lTup, String lAtt, String o, String rTup, String rAtt){
+            lTuple=lTup; lAttr=lAtt; op=o; rTuple=rTup; rAttr=rAtt;
+            isConst=false;
         }
-        // t1.A op CONST  或  t1.A op t1.B
-        DCAtom(String l,String o,String rhs, boolean isConst, boolean same){
-            lAttr=l; op=o; this.isConst=isConst; this.sameTuple=same;
-            if(isConst) constVal=rhs; else rAttr=rhs;
+        // t1.A op CONST
+        DCAtom(String lTup, String lAtt, String o, String constant){
+            lTuple=lTup; lAttr=lAtt; op=o; constVal=constant;
+            isConst=true;
+        }
+
+        @Override
+        public String toString() {
+            if(isConst) {
+                return lTuple + "." + lAttr + " " + op + " \"" + constVal + "\"";
+            } else {
+                return lTuple + "." + lAttr + " " + op + " " + rTuple + "." + rAttr;
+            }
         }
     }
 
@@ -162,20 +172,19 @@ public class Main {
                         if(m.group(4) != null) {          // 右边是另一个元组的属性
                             String rightTuple = m.group(4);
                             String rightAttr = cleanAttributeName(m.group(5));
-                            boolean sameTuple = leftTuple.equals(rightTuple);
-                            clause.add(new DCAtom(leftAttr, op, rightAttr, false, sameTuple));
+                            clause.add(new DCAtom(leftTuple, leftAttr, op, rightTuple, rightAttr));
                         }
                         else if(m.group(6) != null) {     // 数字常量
                             String constVal = m.group(6);
-                            clause.add(new DCAtom(leftAttr, op, constVal, true, false));
+                            clause.add(new DCAtom(leftTuple, leftAttr, op, constVal));
                         }
                         else if(m.group(7) != null) {     // 双引号字符串常量
                             String constVal = m.group(7);
-                            clause.add(new DCAtom(leftAttr, op, constVal, true, false));
+                            clause.add(new DCAtom(leftTuple, leftAttr, op, constVal));
                         }
                         else if(m.group(8) != null) {     // 单引号字符串常量
                             String constVal = m.group(8);
-                            clause.add(new DCAtom(leftAttr, op, constVal, true, false));
+                            clause.add(new DCAtom(leftTuple, leftAttr, op, constVal));
                         }
                     } else {
                         System.out.println("  WARNING: Could not parse atom: " + atomStr);
@@ -212,10 +221,16 @@ public class Main {
     }
 
     static boolean sat(DCAtom a,Fact f1,Fact f2){
-        String v1=f1.get(a.lAttr); if(v1==null) return false;
+        Fact leftFact = a.lTuple.equals("t1") ? f1 : f2;
+        String v1 = leftFact.get(a.lAttr);
+
+        if(v1==null) {
+            return false;
+        }
+
         if(a.isConst){
             String c=a.constVal;
-            return switch(a.op){
+            boolean result = switch(a.op){
                 case "="  -> v1.equals(c);
                 case "!=" -> !v1.equals(c);
                 case ">"  -> cmpNum(v1,c)>0;
@@ -224,10 +239,14 @@ public class Main {
                 case "<=" -> cmpNum(v1,c)<=0;
                 default   -> false;
             };
+            return result;
         }else{
-            String v2=a.sameTuple ? f1.get(a.rAttr) : f2.get(a.rAttr);
-            if(v2==null) return false;
-            return switch(a.op){
+            Fact rightFact = a.rTuple.equals("t1") ? f1 : f2;
+            String v2 = rightFact.get(a.rAttr);
+            if(v2==null) {
+                 return false;
+            }
+            boolean result = switch(a.op){
                 case "="  -> v1.equals(v2);
                 case "!=" -> !v1.equals(v2);
                 case ">"  -> cmpNum(v1,v2)>0;
@@ -236,12 +255,15 @@ public class Main {
                 case "<=" -> cmpNum(v1,v2)<=0;
                 default   -> false;
             };
+            return result;
         }
     }
 
     static boolean violatesDC(List<DCAtom> clause,Fact f1,Fact f2){
+
         // DC违反：当所有原子都为真时，DC被违反
-        for(DCAtom a: clause) {
+        for(int i = 0; i < clause.size(); i++) {
+            DCAtom a = clause.get(i);
             if(!sat(a,f1,f2)) {
                 return false;
             }
@@ -268,7 +290,55 @@ public class Main {
         }
     }
 
-    /* --- 极小满足集查找 --- */
+    /* --- UCQ查询解析和处理 --- */
+    static class ConjunctiveQuery {
+        List<QueryAtom> atoms;
+
+        ConjunctiveQuery(List<QueryAtom> atoms) {
+            this.atoms = atoms;
+        }
+
+        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices) {
+            // 一个合取查询被满足当且仅当所有原子都被满足
+            for(QueryAtom atom : atoms) {
+                if(!atom.isSatisfiedBy(facts, indices)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    static class QueryAtom {
+        Map<String, String> conditions; // 属性 -> 要求的值
+
+        QueryAtom(Map<String, String> conditions) {
+            this.conditions = conditions;
+        }
+
+        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices) {
+            // 原子被满足当且仅当存在至少一个事实满足所有条件
+            for(Integer idx : indices) {
+                Fact fact = facts.get(idx);
+                boolean satisfiesAll = true;
+
+                for(String attr : conditions.keySet()) {
+                    String requiredValue = conditions.get(attr);
+                    String actualValue = fact.get(attr);
+                    if(actualValue == null || !actualValue.equals(requiredValue)) {
+                        satisfiesAll = false;
+                        break;
+                    }
+                }
+
+                if(satisfiesAll) {
+                    return true; // 找到一个满足所有条件的事实
+                }
+            }
+            return false;
+        }
+    }
+
     static List<Set<Integer>> findMinimalSatisfyingSets(List<Fact> facts, Path queryPath) throws IOException{
         List<Set<Integer>> minimalSets = new ArrayList<>();
         if(!Files.exists(queryPath)) {
@@ -276,47 +346,13 @@ public class Main {
             return minimalSets;
         }
 
-        Map<String, Set<String>> queryConditions = new HashMap<>();
-        try(BufferedReader br = Files.newBufferedReader(queryPath)){
-            String l;
-            while((l = br.readLine()) != null){
-                l = l.trim();
-                if(l.isEmpty() || l.startsWith("#") || !l.contains("=")) continue;
-
-                String[] parts = l.split("=", 2);
-                if(parts.length == 2) {
-                    String attribute = parts[0].trim();
-                    String valuesStr = parts[1].trim();
-
-                    if(!attribute.isEmpty() && !valuesStr.isEmpty()) {
-                        Set<String> allowedValues = new HashSet<>();
-                        // 支持逗号分隔的多个值
-                        for(String val : valuesStr.split(",")) {
-                            String trimmedVal = val.trim();
-                            // 去掉引号
-                            if((trimmedVal.startsWith("\"") && trimmedVal.endsWith("\"")) ||
-                                    (trimmedVal.startsWith("'") && trimmedVal.endsWith("'"))) {
-                                trimmedVal = trimmedVal.substring(1, trimmedVal.length()-1);
-                            }
-                            if(!trimmedVal.isEmpty()) {
-                                allowedValues.add(trimmedVal);
-                            }
-                        }
-                        if(!allowedValues.isEmpty()) {
-                            queryConditions.put(attribute, allowedValues);
-                            System.out.println("Query condition: " + attribute + " ∈ " + allowedValues);
-                        }
-                    }
-                }
-            }
-        }
-
-        if(queryConditions.isEmpty()) {
-            System.out.println("No valid query conditions found");
+        List<ConjunctiveQuery> disjuncts = parseUCQ(queryPath);
+        if(disjuncts.isEmpty()) {
+            System.out.println("No valid queries parsed");
             return minimalSets;
         }
 
-        System.out.println("Searching for minimal satisfying sets...");
+        System.out.println("Parsed " + disjuncts.size() + " disjunct(s)");
 
         // 按大小递增搜索极小满足集
         int n = facts.size();
@@ -325,7 +361,7 @@ public class Main {
         for(int sz = 1; sz <= n && !foundAny; sz++){
             System.out.println("  Checking sets of size " + sz + "...");
             List<Set<Integer>> currentSizeResults = new ArrayList<>();
-            generateCombinations(facts, queryConditions, sz, 0, new ArrayList<>(), currentSizeResults);
+            generateCombinationsUCQ(facts, disjuncts, sz, 0, new ArrayList<>(), currentSizeResults);
 
             if(!currentSizeResults.isEmpty()) {
                 foundAny = true;
@@ -337,44 +373,176 @@ public class Main {
         return minimalSets;
     }
 
-    static void generateCombinations(List<Fact> facts, Map<String, Set<String>> queryConditions,
-                                     int targetSize, int startIndex, List<Integer> current,
-                                     List<Set<Integer>> results){
+    // 解析UCQ查询文件
+    static List<ConjunctiveQuery> parseUCQ(Path queryPath) throws IOException {
+        List<ConjunctiveQuery> disjuncts = new ArrayList<>();
+
+        try(BufferedReader br = Files.newBufferedReader(queryPath)) {
+            StringBuilder queryBuilder = new StringBuilder();
+            String line;
+
+            // 读取整个查询（可能跨多行）
+            while((line = br.readLine()) != null) {
+                line = line.trim();
+                if(!line.isEmpty() && !line.startsWith("#")) {
+                    queryBuilder.append(line).append(" ");
+                }
+            }
+
+            String query = queryBuilder.toString().trim();
+            if(query.isEmpty()) return disjuncts;
+
+            System.out.println("Parsing query: " + query);
+
+            // 支持两种格式：
+            // 1. 简化格式：StudentName=Alice && (Course=CS101 || Course=CS102) && Grade=A
+            // 2. 关系格式：R(x,Alice,CS101,A) ∨ R(x,Alice,CS102,A)
+
+            if(query.contains("(") && query.contains(",")) {
+                // 关系格式
+                return parseRelationalUCQ(query);
+            } else {
+                // 简化格式
+                return parseSimplifiedUCQ(query);
+            }
+        }
+    }
+
+    // 解析关系格式的UCQ：R(x,Alice,CS101,A) ∨ R(x,Alice,CS102,A)
+    static List<ConjunctiveQuery> parseRelationalUCQ(String query) {
+        List<ConjunctiveQuery> disjuncts = new ArrayList<>();
+
+        // 简化的解析：假设属性顺序已知，按位置匹配
+        // 这里需要根据您的具体关系模式调整
+        Pattern relationPattern = Pattern.compile("R\\([^,]*,([^,]+),([^,]+),([^)]+)\\)");
+
+        String[] disjunctStrs = query.split("∨|\\|\\|");
+
+        for(String disjunctStr : disjunctStrs) {
+            disjunctStr = disjunctStr.trim();
+            List<QueryAtom> atoms = new ArrayList<>();
+
+            Matcher m = relationPattern.matcher(disjunctStr);
+            if(m.find()) {
+                Map<String, String> conditions = new HashMap<>();
+
+                // 假设关系模式：R(StudentID, StudentName, Course, Grade)
+                // 您需要根据实际的列名调整
+                String studentName = m.group(1).trim();
+                String course = m.group(2).trim();
+                String grade = m.group(3).trim();
+
+                // 去掉引号
+                studentName = cleanValue(studentName);
+                course = cleanValue(course);
+                grade = cleanValue(grade);
+
+                if(!studentName.equals("_") && !studentName.startsWith("x") && !studentName.startsWith("y")) {
+                    conditions.put("StudentName", studentName); // 需要根据实际列名调整
+                }
+                if(!course.equals("_") && !course.startsWith("x") && !course.startsWith("y")) {
+                    conditions.put("Course", course); // 需要根据实际列名调整
+                }
+                if(!grade.equals("_") && !grade.startsWith("x") && !grade.startsWith("y")) {
+                    conditions.put("Grade", grade); // 需要根据实际列名调整
+                }
+
+                if(!conditions.isEmpty()) {
+                    atoms.add(new QueryAtom(conditions));
+                    System.out.println("  Parsed atom: " + conditions);
+                }
+            }
+
+            if(!atoms.isEmpty()) {
+                disjuncts.add(new ConjunctiveQuery(atoms));
+            }
+        }
+
+        return disjuncts;
+    }
+
+    // 解析简化格式的UCQ：StudentName=Alice && (Course=CS101 || Course=CS102) && Grade=A
+    static List<ConjunctiveQuery> parseSimplifiedUCQ(String query) {
+        List<ConjunctiveQuery> disjuncts = new ArrayList<>();
+
+        // 处理析取（OR）：将||或|分隔的部分作为不同的析取项
+        String[] orParts = query.split("\\|\\|");
+
+        for(String orPart : orParts) {
+            orPart = orPart.trim();
+            List<QueryAtom> atoms = new ArrayList<>();
+            Map<String, String> conditions = new HashMap<>();
+
+            // 处理合取（AND）：将&&分隔的条件组合
+            String[] andParts = orPart.split("&&");
+
+            for(String andPart : andParts) {
+                andPart = andPart.trim();
+
+                // 处理括号中的OR条件
+                if(andPart.contains("(") && andPart.contains(")")) {
+                    // 例如：(Course=CS101 || Course=CS102)
+                    String innerContent = andPart.substring(andPart.indexOf('(') + 1, andPart.lastIndexOf(')'));
+                    String[] innerOrs = innerContent.split("\\|\\|");
+
+                    // 为每个内部OR创建单独的析取项
+                    // 这里简化处理，实际需要生成笛卡尔积
+                    for(String innerOr : innerOrs) {
+                        if(innerOr.contains("=")) {
+                            String[] kv = innerOr.split("=", 2);
+                            if(kv.length == 2) {
+                                conditions.put(kv[0].trim(), cleanValue(kv[1].trim()));
+                            }
+                        }
+                    }
+                } else if(andPart.contains("=")) {
+                    String[] kv = andPart.split("=", 2);
+                    if(kv.length == 2) {
+                        conditions.put(kv[0].trim(), cleanValue(kv[1].trim()));
+                    }
+                }
+            }
+
+            if(!conditions.isEmpty()) {
+                atoms.add(new QueryAtom(conditions));
+                disjuncts.add(new ConjunctiveQuery(atoms));
+                System.out.println("  Parsed simplified query: " + conditions);
+            }
+        }
+
+        return disjuncts;
+    }
+
+    static String cleanValue(String value) {
+        if(value == null) return null;
+        value = value.trim();
+        if((value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    static void generateCombinationsUCQ(List<Fact> facts, List<ConjunctiveQuery> disjuncts,
+                                        int targetSize, int startIndex, List<Integer> current,
+                                        List<Set<Integer>> results){
         if(current.size() == targetSize){
-            if(satisfiesAllConditions(facts, current, queryConditions)){
-                results.add(new HashSet<>(current));
+            Set<Integer> currentSet = new HashSet<>(current);
+            // UCQ被满足当且仅当至少一个析取项被满足
+            for(ConjunctiveQuery cq : disjuncts) {
+                if(cq.isSatisfiedBy(facts, currentSet)) {
+                    results.add(currentSet);
+                    return; // 找到一个满足的析取项就够了
+                }
             }
             return;
         }
 
         for(int i = startIndex; i < facts.size(); i++){
             current.add(i);
-            generateCombinations(facts, queryConditions, targetSize, i+1, current, results);
+            generateCombinationsUCQ(facts, disjuncts, targetSize, i+1, current, results);
             current.remove(current.size()-1);
         }
-    }
-
-    static boolean satisfiesAllConditions(List<Fact> facts, List<Integer> indices,
-                                          Map<String, Set<String>> queryConditions){
-        // 对每个查询条件，检查选定的事实是否至少有一个满足该条件
-        for(String attribute : queryConditions.keySet()){
-            Set<String> requiredValues = queryConditions.get(attribute);
-            boolean foundMatchingValue = false;
-
-            for(Integer idx : indices){
-                Fact fact = facts.get(idx);
-                String actualValue = fact.get(attribute);
-                if(actualValue != null && requiredValues.contains(actualValue)) {
-                    foundMatchingValue = true;
-                    break;
-                }
-            }
-
-            if(!foundMatchingValue) {
-                return false; // 该条件没有被任何选定的事实满足
-            }
-        }
-        return true; // 所有条件都被满足
     }
 
     /* --- 生成解-冲突图 --- */
@@ -412,6 +580,7 @@ public class Main {
                 for(var fd : fds){
                     if(violatesFD(fd.getKey(), fd.getValue(), f1, f2)){
                         hasConflict = true;
+                        System.out.println("    FD violation between fact " + i + " and " + j);
                         break;
                     }
                 }
@@ -421,6 +590,7 @@ public class Main {
                     for(var dc : dcs){
                         if(violatesDC(dc, f1, f2)){
                             hasConflict = true;
+                            System.out.println("    DC violation between fact " + i + " and " + j);
                             break;
                         }
                     }
@@ -487,6 +657,8 @@ public class Main {
                 bw.newLine();
             }
         }
+
+        System.out.println("Solution-conflict graph written to: " + out);
     }
 
     /* ---------- Main ---------- */
