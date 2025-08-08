@@ -1,7 +1,0 @@
-Province -> City
-Province -> River
-Province -> Monitoring_Station
-Province -> Year
-Province -> Water_Quality_Index
-Province -> Pollution_Level
-Province -> Remarks

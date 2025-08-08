@@ -1,0 +1,2 @@
+¬( t1.director = t1.writer && t1.director = t1.star )
+¬( t1.genre = "Horror" && t1.year < 1985 )
