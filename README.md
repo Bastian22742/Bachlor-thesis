@@ -1,5 +1,4 @@
 # Features
-- Conflict Graph  
 - Solution-Conflict Graph  
 - Tree Decomposition  
 - Treewidth Report  
@@ -10,7 +9,7 @@ project‑root/
 ├── csv/       #  input tables  (name.csv)
 ├── fd/        # functional dependencies (name.fd)
 ├── dc/        # denial constraints     (name.dc)
-├── query/     #  selection predicates   (name.query)
+├── q/     #  selection predicates   (name.q)
 └── out/       #   generated graphs & td files
 ---
 ## Input File Formats
@@ -27,16 +26,15 @@ Left‑hand side attributes separated by commas, arrow ->, then a single right�
 ### `*.dc`
 Denial constraints written in conjunctive form, e.g. 
 ¬( t1.A = t2.A && t1.B != t2.B )
-Supported operators: =  !=  <  <=  >  >=.
+Supported operators: =  !=  <  <=  >  >= && ||.
 ---
-### `*.query`
-Selection predicates, one per line; each line: 
-attribute = value1,value2,…
-Values are OR‑combined within a line; different lines are AND‑combined.
+### `*.q`
+monotonic Boolean query q(BCQ,BCQ!=,BUCQ!=),e.g.
+R(x1, "Charlie", "CS101", x2, x3, x4) && R(y1, "Bob", "CS101", y2, y3, y4) && (x2 != y2)
+Supported operators:&&(∧), ||(∨), =, != .
 ---
 ## Output Overview
 result/
-├── xxx_conflict_graph.gr
 ├── xxx_result.td
 ├──xxx_treewidth.txt
 └── xxx_solution_conflict_graph.gr
