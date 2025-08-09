@@ -1,1 +1,0 @@
-¬(t1."Community Area" = t2."Community Area" && t1."Cumulative Deaths 2006 - 2010" = t2."Cumulative Deaths 2006 - 2010" && t1."Cause of Death" = "Alzheimers disease" && t2."Cause of Death" = "Cancer (all sites)")

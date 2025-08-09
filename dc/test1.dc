@@ -1,2 +1,0 @@
-¬(t1.Name = t2.Name && t1.Age = t2.Age && t1.Score != t2.Score)
-¬(t1.Name = t2.Name && t1.Age != t2.Age)

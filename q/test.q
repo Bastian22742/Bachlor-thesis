@@ -1,3 +1,1 @@
-StudentName = Alice
-Course = CS101, CS201
-Grade = A
+R(x1, "Charlie", "CS101", x2, x3, x4) && R(y1, "Bob", "CS101", y2, y3, y4) && (x2 != y2)
