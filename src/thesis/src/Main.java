@@ -320,146 +320,32 @@ public class Main {
         return true;
     }
 
-    /* ---------- 查询处理 ---------- */
-    static class ConjunctiveQuery {
-        List<QueryAtom> atoms;
-        List<VariableConstraint> variableConstraints;
+    /* ---------- 改进的查询处理 ---------- */
 
-        ConjunctiveQuery(List<QueryAtom> atoms) {
-            this.atoms = atoms;
-            this.variableConstraints = new ArrayList<>();
-        }
-
-        ConjunctiveQuery(List<QueryAtom> atoms, List<VariableConstraint> variableConstraints) {
-            this.atoms = atoms;
-            this.variableConstraints = variableConstraints;
-        }
-
-        // 检查给定的事实集合是否满足这个合取查询
-        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices, String[] headers) {
-            // 首先检查基本的原子条件
-            for(QueryAtom atom : atoms) {
-                if(!atom.isSatisfiedBy(facts, indices)) {
-                    return false;
-                }
-            }
-
-            // 然后检查变量约束
-            if (!variableConstraints.isEmpty()) {
-                return checkVariableConstraints(facts, indices, headers);
-            }
-
-            return true;
-        }
-
-        private boolean checkVariableConstraints(List<Fact> facts, Set<Integer> indices, String[] headers) {
-            // 为每个原子找到匹配的事实，并建立变量绑定
-            List<List<Integer>> atomMatches = new ArrayList<>();
-
-            for (QueryAtom atom : atoms) {
-                List<Integer> matches = new ArrayList<>();
-                for (Integer idx : indices) {
-                    Fact fact = facts.get(idx);
-                    if (atom.isSatisfiedByFact(fact)) {
-                        matches.add(idx);
-                    }
-                }
-                atomMatches.add(matches);
-            }
-
-            // 生成所有可能的变量绑定组合
-            return generateVariableBindings(atomMatches, 0, new ArrayList<>(), facts, headers);
-        }
-
-        private boolean generateVariableBindings(List<List<Integer>> atomMatches, int atomIndex,
-                                                 List<Integer> currentBinding, List<Fact> facts, String[] headers) {
-            if (atomIndex == atomMatches.size()) {
-                // 检查当前绑定是否满足所有变量约束
-                Map<String, String> variableMap = buildVariableMap(currentBinding, facts, headers);
-                return checkAllVariableConstraints(variableMap);
-            }
-
-            // 尝试当前原子的所有可能匹配
-            for (Integer factIndex : atomMatches.get(atomIndex)) {
-                currentBinding.add(factIndex);
-                if (generateVariableBindings(atomMatches, atomIndex + 1, currentBinding, facts, headers)) {
-                    return true;
-                }
-                currentBinding.remove(currentBinding.size() - 1);
-            }
-
-            return false;
-        }
-
-        private Map<String, String> buildVariableMap(List<Integer> factIndices, List<Fact> facts, String[] headers) {
-            Map<String, String> variableMap = new HashMap<>();
-
-            for (int i = 0; i < factIndices.size(); i++) {
-                Integer factIndex = factIndices.get(i);
-                Fact fact = facts.get(factIndex);
-
-                // 根据原子中的变量模式建立绑定
-                for (int j = 0; j < headers.length; j++) {
-                    String headerName = headers[j];
-                    String value = fact.get(headerName);
-
-                    // 为这个原子的第j个位置的变量建立绑定
-                    String varName = getVariableName(i, j);
-                    if (varName != null && value != null) {
-                        variableMap.put(varName, value);
-                    }
-                }
-            }
-
-            return variableMap;
-        }
-
-        private String getVariableName(int atomIndex, int positionIndex) {
-            // 根据原子索引和位置索引生成变量名
-            // 简化实现：假设第一个原子使用 x1, x2, x3...，第二个使用 y1, y2, y3...
-            char prefix = (atomIndex == 0) ? 'x' : 'y';
-            return prefix + String.valueOf(positionIndex + 1);
-        }
-
-        private boolean checkAllVariableConstraints(Map<String, String> variableMap) {
-            for (VariableConstraint constraint : variableConstraints) {
-                if (!constraint.isSatisfied(variableMap)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        @Override
-        public String toString() {
-            if (variableConstraints.isEmpty()) {
-                return atoms.toString();
-            } else {
-                return atoms.toString() + " with constraints: " + variableConstraints.toString();
-            }
-        }
-    }
-
+    // 查询原子，包含变量信息
     static class QueryAtom {
-        Map<String, String> conditions;
+        Map<String, String> constantConditions;  // 属性 -> 常量值
+        Map<String, String> variableBindings;    // 属性 -> 变量名
+        String atomName;  // 用于调试
 
-        QueryAtom(Map<String, String> conditions) {
-            this.conditions = conditions;
+        QueryAtom(String atomName) {
+            this.atomName = atomName;
+            this.constantConditions = new HashMap<>();
+            this.variableBindings = new HashMap<>();
         }
 
-        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices) {
-            for(Integer idx : indices) {
-                Fact fact = facts.get(idx);
-                if (isSatisfiedByFact(fact)) {
-                    return true;
-                }
-            }
-            return false;
+        void addConstantCondition(String attribute, String value) {
+            constantConditions.put(attribute, value);
+        }
+
+        void addVariableBinding(String attribute, String variable) {
+            variableBindings.put(attribute, variable);
         }
 
         boolean isSatisfiedByFact(Fact fact) {
-            for(String attr : conditions.keySet()) {
-                String requiredValue = conditions.get(attr);
+            // 检查常量条件
+            for(String attr : constantConditions.keySet()) {
+                String requiredValue = constantConditions.get(attr);
                 String actualValue = fact.get(attr);
                 if(actualValue == null || !actualValue.equals(requiredValue)) {
                     return false;
@@ -468,9 +354,116 @@ public class Main {
             return true;
         }
 
+        // 从事实中提取变量绑定
+        Map<String, String> extractVariableBindings(Fact fact) {
+            Map<String, String> bindings = new HashMap<>();
+            for(String attr : variableBindings.keySet()) {
+                String variable = variableBindings.get(attr);
+                String value = fact.get(attr);
+                if(value != null) {
+                    bindings.put(variable, value);
+                }
+            }
+            return bindings;
+        }
+
         @Override
         public String toString() {
-            return conditions.toString();
+            return atomName + ": constants=" + constantConditions + ", variables=" + variableBindings;
+        }
+    }
+
+    static class ConjunctiveQuery {
+        List<QueryAtom> atoms;
+        List<VariableConstraint> variableConstraints;
+
+        ConjunctiveQuery(List<QueryAtom> atoms, List<VariableConstraint> variableConstraints) {
+            this.atoms = atoms;
+            this.variableConstraints = variableConstraints;
+        }
+
+        // 检查给定的事实集合是否满足这个合取查询
+        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices, String[] headers) {
+            // 为每个原子找到匹配的事实
+            List<List<Integer>> atomMatches = new ArrayList<>();
+
+            for(QueryAtom atom : atoms) {
+                List<Integer> matches = new ArrayList<>();
+                for(Integer idx : indices) {
+                    Fact fact = facts.get(idx);
+                    if(atom.isSatisfiedByFact(fact)) {
+                        matches.add(idx);
+                    }
+                }
+                atomMatches.add(matches);
+
+                // 如果某个原子没有匹配的事实，则整个查询失败
+                if(matches.isEmpty()) {
+                    return false;
+                }
+            }
+
+            // 尝试所有可能的变量绑定组合
+            return tryAllCombinations(atomMatches, 0, new ArrayList<>(), facts);
+        }
+
+        private boolean tryAllCombinations(List<List<Integer>> atomMatches, int atomIndex,
+                                           List<Integer> currentAssignment, List<Fact> facts) {
+            if(atomIndex == atomMatches.size()) {
+                // 检查当前分配是否满足所有变量约束
+                return checkVariableConstraints(currentAssignment, facts);
+            }
+
+            // 尝试当前原子的所有可能匹配
+            for(Integer factIndex : atomMatches.get(atomIndex)) {
+                currentAssignment.add(factIndex);
+                if(tryAllCombinations(atomMatches, atomIndex + 1, currentAssignment, facts)) {
+                    return true;
+                }
+                currentAssignment.remove(currentAssignment.size() - 1);
+            }
+
+            return false;
+        }
+
+        private boolean checkVariableConstraints(List<Integer> factIndices, List<Fact> facts) {
+            // 收集所有变量绑定
+            Map<String, String> allBindings = new HashMap<>();
+
+            for(int i = 0; i < factIndices.size(); i++) {
+                Integer factIndex = factIndices.get(i);
+                Fact fact = facts.get(factIndex);
+                QueryAtom atom = atoms.get(i);
+
+                Map<String, String> atomBindings = atom.extractVariableBindings(fact);
+
+                // 检查变量绑定的一致性
+                for(String variable : atomBindings.keySet()) {
+                    String value = atomBindings.get(variable);
+                    if(allBindings.containsKey(variable)) {
+                        // 如果变量已经有绑定，检查是否一致
+                        if(!allBindings.get(variable).equals(value)) {
+                            return false;  // 变量绑定不一致
+                        }
+                    } else {
+                        allBindings.put(variable, value);
+                    }
+                }
+            }
+
+            // 检查所有变量约束
+            for(VariableConstraint constraint : variableConstraints) {
+                if(!constraint.isSatisfied(allBindings)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return atoms.toString() + " with constraints: " + variableConstraints.toString();
         }
     }
 
@@ -530,7 +523,7 @@ public class Main {
         int n = facts.size();
 
         // 按大小递增搜索，找到满足查询的最小集合
-        for(int size = 1; size <= n; size++) {
+        for(int size = query.atoms.size(); size <= n; size++) {  // 至少需要和原子数量一样多的事实
             System.out.println("    Checking sets of size " + size + "...");
             List<Set<Integer>> currentSizeSets = new ArrayList<>();
 
@@ -557,7 +550,6 @@ public class Main {
                 }
 
                 // 如果找到了满足条件的集合，不需要检查更大的集合
-                // （因为我们要找的是最小集合）
                 if(!minimalSets.isEmpty()) {
                     break;
                 }
@@ -585,7 +577,7 @@ public class Main {
         }
     }
 
-    /* ---------- 查询解析 ---------- */
+    /* ---------- 改进的查询解析 ---------- */
     static List<ConjunctiveQuery> parseUCQ(Path queryPath, String[] headers) throws IOException {
         List<ConjunctiveQuery> disjuncts = new ArrayList<>();
 
@@ -627,24 +619,29 @@ public class Main {
             Pattern relationPattern = Pattern.compile("[RT]\\(([^)]+)\\)");
             Matcher matcher = relationPattern.matcher(disjunctStr);
 
+            int atomIndex = 0;
             while(matcher.find()) {
                 String params = matcher.group(1);
                 String[] values = params.split(",");
 
-                Map<String, String> conditions = new HashMap<>();
+                QueryAtom atom = new QueryAtom("Atom" + atomIndex);
 
                 for(int i = 0; i < values.length && i < headers.length; i++) {
                     String value = cleanValue(values[i].trim());
 
-                    if(!isVariable(value) && !value.isEmpty()) {
-                        conditions.put(headers[i], value);
+                    if(isVariable(value)) {
+                        // 这是一个变量
+                        atom.addVariableBinding(headers[i], value);
+                        System.out.println("  Variable binding: " + headers[i] + " -> " + value);
+                    } else if(!value.isEmpty()) {
+                        // 这是一个常量
+                        atom.addConstantCondition(headers[i], value);
+                        System.out.println("  Constant condition: " + headers[i] + " = " + value);
                     }
                 }
 
-                if(!conditions.isEmpty()) {
-                    atoms.add(new QueryAtom(conditions));
-                    System.out.println("  Parsed relational atom: " + conditions);
-                }
+                atoms.add(atom);
+                atomIndex++;
             }
 
             // 解析变量约束 (x1 != y1), (x1 = y1) 等
@@ -680,9 +677,14 @@ public class Main {
 
             for(Map<String, String> conditions : alternatives) {
                 if(!conditions.isEmpty()) {
+                    QueryAtom atom = new QueryAtom("SimpleAtom");
+                    for(String attr : conditions.keySet()) {
+                        atom.addConstantCondition(attr, conditions.get(attr));
+                    }
+
                     List<QueryAtom> atoms = new ArrayList<>();
-                    atoms.add(new QueryAtom(conditions));
-                    disjuncts.add(new ConjunctiveQuery(atoms));
+                    atoms.add(atom);
+                    disjuncts.add(new ConjunctiveQuery(atoms, new ArrayList<>()));
                     System.out.println("  Parsed attribute-value query: " + conditions);
                 }
             }
@@ -771,8 +773,7 @@ public class Main {
         if(value == null || value.isEmpty()) return true;
         return value.equals("_") ||
                 value.equals("*") ||
-                value.matches("^[xy][0-9]*$") ||
-                value.matches("^[A-Z][0-9]*$");
+                value.matches("^[a-z][0-9]*$");       // var, var1, VAR, VAR1 等
     }
 
     static String cleanValue(String value) {
@@ -1027,4 +1028,3 @@ public class Main {
         System.out.println("\nAll files processed successfully!");
     }
 }
-
