@@ -1,0 +1,1 @@
+¬(t1."StudentID" = t2."StudentID" && t1."Course" = "CS101" && t2."Course" = "CS201" && t2."Prerequisite" = "None")

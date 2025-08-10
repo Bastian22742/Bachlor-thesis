@@ -10,7 +10,7 @@ project‑root/
 ├── csv/       #  input tables  (name.csv)
 ├── fd/        # functional dependencies (name.fd)
 ├── dc/        # denial constraints     (name.dc)
-├── query/     #  selection predicates   (name.query)
+├── q/     #  selection predicates   (name.q)
 └── out/       #   generated graphs & td files
 ---
 ## Input File Formats
@@ -29,15 +29,12 @@ Denial constraints written in conjunctive form, e.g.
 ¬( t1.A = t2.A && t1.B != t2.B )
 Supported operators: =  !=  <  <=  >  >=.
 ---
-### `*.query`
-Selection predicates, one per line; each line: 
-attribute = value1,value2,…
-Values are OR‑combined within a line; different lines are AND‑combined.
+### `*.q`
+In form BCQ!=
 ---
 ## Output Overview
 result/
-├── xxx_conflict_graph.gr
-├── xxx_result.td
-├──xxx_treewidth.txt
-└── xxx_solution_conflict_graph.gr
+├── xxx_ggm_graph.gr
+├── xxx_ggm_result.td
+└── xxx__ggm_treewidth.txt
 ---

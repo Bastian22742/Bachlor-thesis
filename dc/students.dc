@@ -1,2 +1,0 @@
-¬( t1.Name = t2.Name && t1.Year = t2.Year && t1.Grade != t2.Grade )
-
