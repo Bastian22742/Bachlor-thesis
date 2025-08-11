@@ -33,8 +33,7 @@ public class Dynmaic_Programming_Based_for_CQA {
         public TreeDecomposition(TDNode root){ this.root=root; collect(root); }
         private void collect(TDNode u){ nodes.put(u.id,u); for(TDNode v:u.children) collect(v); }
     }
-
-    /* ========================= Engine ========================= */
+    
 
     public static final class Engine {
         private final Hypergraph H;
@@ -59,7 +58,6 @@ public class Dynmaic_Programming_Based_for_CQA {
             return total;
         }
 
-        /* ---------- prepare ---------- */
 
         private void prepare(){
             for (TDNode b : T.nodes.values()) {
@@ -84,7 +82,6 @@ public class Dynmaic_Programming_Based_for_CQA {
             }
         }
 
-        /* ---------- DP ---------- */
 
         private BigInteger f(TDNode b, int Cmask, int rMask, int sMask){
             FKey key = new FKey(b.id, Cmask, rMask, sMask);
@@ -170,7 +167,6 @@ public class Dynmaic_Programming_Based_for_CQA {
             return sMask;
         }
 
-        /* ---------- helpers ---------- */
 
         private static boolean containsEdge(List<BitSet> edgesInBag, TDNode b, int rMask){
             BitSet rSet = new BitSet();
@@ -192,7 +188,6 @@ public class Dynmaic_Programming_Based_for_CQA {
             return res;
         }
 
-        /* ---------- map & keys ---------- */
 
         private static final class BCMapping {
             final int[] interToBBit, interToCBit;

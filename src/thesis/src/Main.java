@@ -14,10 +14,6 @@ public class Main {
     private static final String QUERY_DIR = "./query";
     private static final String OUT_DIR   = "./result";
 
-    /* ------------------------------
-     *           Data model
-     * ------------------------------ */
-
     static class Fact {
         final Map<String,String> map = new HashMap<>();
         Fact(String[] header, String[] values){
@@ -87,9 +83,6 @@ public class Main {
         boolean isEmpty(){ return disj.isEmpty(); }
     }
 
-    /* ------------------------------
-     *        Normalization utils
-     * ------------------------------ */
 
     /** 将输入文本统一化：去 BOM、全角→半角、奇怪空白→普通空格、常见运算符替换。 */
     static String norm(String s){
@@ -134,9 +127,6 @@ public class Main {
         return depth == 0;
     }
 
-    /* ------------------------------
-     *            CSV parser
-     * ------------------------------ */
 
     static List<String> parseCSVLine(String line){
         List<String> out = new ArrayList<>();
@@ -165,9 +155,7 @@ public class Main {
         return f.toArray(new String[0]);
     }
 
-    /* ------------------------------
-     *            Parsing
-     * ------------------------------ */
+
 
     static List<Fact> readFacts(Path csv) throws IOException{
         List<Fact> list=new ArrayList<>();
@@ -367,9 +355,6 @@ public class Main {
         return idx;
     }
 
-    /* ------------------------------
-     *          Evaluation
-     * ------------------------------ */
 
     static int cmpNum(String a,String b){
         try{ return Double.compare(Double.parseDouble(a),Double.parseDouble(b)); }
@@ -425,9 +410,6 @@ public class Main {
         return true;
     }
 
-    /* ------------------------------
-     *  冲突超边（FD/DC） & 图 I/O
-     * ------------------------------ */
 
     static class BuildResult {
         List<int[]> hyperedges = new ArrayList<>();
@@ -624,9 +606,6 @@ public class Main {
         }
     }
 
-    /* ------------------------------
-     *     BCQ/BUCQ → 解超边
-     * ------------------------------ */
 
     /** 顶层：BUCQ 的所有子 BCQ 的解边并集，随后做极小化 */
     static List<int[]> buildSolutionHyperedgesBUCQ(List<Fact> facts, BUCQ bu) {
@@ -767,9 +746,6 @@ public class Main {
         return i==small.length;
     }
 
-    /* ------------------------------
-     *               Main
-     * ------------------------------ */
 
     public static void main(String[] args) throws Exception{
 
