@@ -33,7 +33,7 @@ public class Dynmaic_Programming_Based_for_CQA {
         public TreeDecomposition(TDNode root){ this.root=root; collect(root); }
         private void collect(TDNode u){ nodes.put(u.id,u); for(TDNode v:u.children) collect(v); }
     }
-    
+
 
     public static final class Engine {
         private final Hypergraph H;
