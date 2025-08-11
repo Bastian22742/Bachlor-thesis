@@ -1,0 +1,2 @@
+conflict_graph_vertices=4
+solution_conflict_graph_vertices=4

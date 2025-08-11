@@ -1,0 +1,2 @@
+Name,Course,Year,Semester -> Credits,Professor,Department
+Course -> Credits,Department

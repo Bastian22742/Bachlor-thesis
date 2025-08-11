@@ -23,7 +23,9 @@ public class Main {
         Fact(String[] header, String[] values){
             for(int i=0;i<header.length;i++){
                 String v = (i<values.length ? values[i] : null);
-                map.put(header[i].trim(), v==null? null : v.trim());
+                String hk = header[i]==null? null : header[i].trim();
+                if(hk!=null && !hk.isEmpty() && hk.charAt(0)=='\uFEFF') hk = hk.substring(1);
+                map.put(hk, v==null? null : normValue(v));
             }
         }
         String get(String k){ return map.get(k); }
@@ -34,9 +36,7 @@ public class Main {
         final List<String> lhs;
         final List<String> rhs;
         FD(List<String> lhs, List<String> rhs){ this.lhs=lhs; this.rhs=rhs; }
-        String desc(){
-            return String.join(",", lhs) + " -> " + String.join(",", rhs);
-        }
+        String desc(){ return String.join(",", lhs) + " -> " + String.join(",", rhs); }
     }
 
     /** DC 原子：左是 tX.attr，右可为 tY.attr 或常量。 */
@@ -51,7 +51,7 @@ public class Main {
             this.isConst=false; this.rVar=rVar; this.rAttr=rAttr; this.constVal=null;
         }
         DCAtom(String lVar, String lAttr, String op, String constVal){
-            this.lVar=lVar; this.lAttr=lAttr; this.op=op; // 修复过：this.lAttr=lattr 的拼写
+            this.lVar=lVar; this.lAttr=lAttr; this.op=op;
             this.isConst=true; this.rVar=null; this.rAttr=null; this.constVal=constVal;
         }
     }
@@ -61,6 +61,77 @@ public class Main {
         final List<DCAtom> atoms = new ArrayList<>();
         final List<String> vars  = new ArrayList<>();
         void addVar(String v){ if(!vars.contains(v)) vars.add(v); }
+    }
+
+    /** 一个 BCQ≠：若干原子的合取（AND） */
+    static class BCQ {
+        final List<DCAtom> atoms = new ArrayList<>(); // 复用 DCAtom
+        final List<String> vars  = new ArrayList<>();
+        void addVar(String v){ if(!vars.contains(v)) vars.add(v); }
+        String desc(){
+            List<String> parts = new ArrayList<>();
+            for(DCAtom a: atoms){
+                if(a.isConst){
+                    parts.add(a.lVar+"."+a.lAttr+" "+a.op+" "+a.constVal);
+                }else{
+                    parts.add(a.lVar+"."+a.lAttr+" "+a.op+" "+a.rVar+"."+a.rAttr);
+                }
+            }
+            return String.join(" && ", parts);
+        }
+    }
+
+    /** 一个 BUCQ≠：若干 BCQ 的析取（OR） */
+    static class BUCQ {
+        final List<BCQ> disj = new ArrayList<>();
+        boolean isEmpty(){ return disj.isEmpty(); }
+    }
+
+    /* ------------------------------
+     *        Normalization utils
+     * ------------------------------ */
+
+    /** 将输入文本统一化：去 BOM、全角→半角、奇怪空白→普通空格、常见运算符替换。 */
+    static String norm(String s){
+        if(s==null) return null;
+        if(!s.isEmpty() && s.charAt(0)=='\uFEFF') s = s.substring(1); // strip BOM
+        s = s.replace('\u00A0',' '); // NBSP -> space
+        s = s.replace('（','(').replace('）',')')
+                .replace('，',',').replace('。',' ')
+                .replace('“','"').replace('”','"')
+                .replace('‘','\'').replace('’','\'')
+                .replace('＝','=').replace('＜','<').replace('＞','>')
+                .replace("≤","<=").replace("≥",">=")
+                .replace("＆＆","&&").replace("｜｜","||")
+                .replace("→","->");
+        s = s.replaceAll("\\s+"," ").trim();
+        return s;
+    }
+
+    /** 轻量归一化 CSV 中的值（不动列名）。*/
+    static String normValue(String s){
+        if (s == null) return null;
+        s = s.replace("\uFEFF","")     // BOM
+                .replace('\u00A0',' ')    // NBSP
+                .replace('　',' ')        // 全角空格
+                .trim();
+        return s;
+    }
+
+    /** 判断整串是否被一对外层括号完整包裹。*/
+    static boolean isWrappedByWholeParen(String s){
+        if(s==null || s.length()<2) return false;
+        if(!(s.startsWith("(") && s.endsWith(")"))) return false;
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') depth++;
+            else if (c == ')') {
+                depth--;
+                if (depth == 0 && i < s.length() - 1) return false; // 中途闭合
+            }
+        }
+        return depth == 0;
     }
 
     /* ------------------------------
@@ -77,7 +148,7 @@ public class Main {
                 if(inQuotes && i+1<line.length() && line.charAt(i+1)=='"'){
                     sb.append('"'); i++; // 转义的双引号
                 }else{
-                    inQuotes = !inQuotes; // 切换状态
+                    inQuotes = !inQuotes;
                 }
             }else if(c==',' && !inQuotes){
                 out.add(sb.toString()); sb.setLength(0);
@@ -103,11 +174,12 @@ public class Main {
         try(BufferedReader br=Files.newBufferedReader(csv)){
             String header=br.readLine();
             if(header==null) return list;
+            if(!header.isEmpty() && header.charAt(0)=='\uFEFF') header = header.substring(1);
             String[] h = parseCSVToArray(header);
             String line;
             while((line=br.readLine())!=null){
-                String[] vals = parseCSVToArray(line);
-                list.add(new Fact(h, vals));
+                if(!line.isEmpty() && line.charAt(0)=='\uFEFF') line = line.substring(1);
+                list.add(new Fact(h, parseCSVToArray(line)));
             }
         }
         return list;
@@ -119,16 +191,20 @@ public class Main {
         try(BufferedReader br=Files.newBufferedReader(fd)){
             String l;
             while((l=br.readLine())!=null){
-                l=l.trim();
+                l = norm(l);
                 if(l.isEmpty()||l.startsWith("#")) continue;
-                // 兼容 Unicode 箭头
-                l = l.replace("→", "->");
                 String[] parts=l.split("->");
                 if(parts.length!=2) continue;
                 List<String> lhs = new ArrayList<>();
-                for(String a: parts[0].split(",")) if(!a.trim().isEmpty()) lhs.add(a.trim());
+                for(String a: parts[0].split(",")) {
+                    String t = norm(a);
+                    if(!t.isEmpty()) lhs.add(t);
+                }
                 List<String> rhs = new ArrayList<>();
-                for(String b: parts[1].split(",")) if(!b.trim().isEmpty()) rhs.add(b.trim());
+                for(String b: parts[1].split(",")) {
+                    String t = norm(b);
+                    if(!t.isEmpty()) rhs.add(t);
+                }
                 if(!lhs.isEmpty() && !rhs.isEmpty())
                     list.add(new FD(lhs, rhs));
             }
@@ -141,23 +217,28 @@ public class Main {
         if(!Files.exists(dc)) return dcs;
 
         final Pattern ATOM = Pattern.compile(
-                "\\s*(t\\d+)\\.([A-Za-z0-9_ ()%-]+)\\s*(==|!=|<=|>=|=|<|>)\\s*(?:(t\\d+)\\.([A-Za-z0-9_ ()%-]+)|([+-]?\\d+(?:\\.\\d+)?)|\"([^\"]*)\")\\s*"
+                "\\s*(t\\d+)\\.([A-Za-z0-9_ ()%-]+)\\s*(==|!=|<=|>=|=|<|>)\\s*"
+                        + "(?:(t\\d+)\\.([A-Za-z0-9_ ()%-]+)|([+-]?\\d+(?:\\.\\d+)?)|\"([^\"]*)\"|'([^']*)')\\s*"
         );
 
         try(BufferedReader br=Files.newBufferedReader(dc)){
             String l;
             while((l=br.readLine())!=null){
-                l=l.trim();
+                l = norm(l);
                 if(l.isEmpty()||l.startsWith("#")) continue;
 
-                if(l.startsWith("¬(") && l.endsWith(")")) l = l.substring(2, l.length()-1).trim();
-                if(l.startsWith("(") && l.endsWith(")"))   l = l.substring(1, l.length()-1).trim();
+                // 只有当整串被外层括号包裹时才裁掉
+                if(l.startsWith("¬(") && l.endsWith(")") && isWrappedByWholeParen(l.substring(1)))
+                    l = l.substring(2, l.length()-1).trim();
+                if(isWrappedByWholeParen(l))
+                    l = l.substring(1, l.length()-1).trim();
 
                 String[] atoms = l.split("&&");
                 DCClause clause = new DCClause();
 
                 for(String at: atoms){
-                    Matcher m = ATOM.matcher(at);
+                    String atn = norm(at);
+                    Matcher m = ATOM.matcher(atn);
                     if(!m.matches()) continue;
                     String lVar = m.group(1);
                     String lAttr= m.group(2).trim();
@@ -171,8 +252,9 @@ public class Main {
                     }else if(m.group(6)!=null){ // number const
                         clause.atoms.add(new DCAtom(lVar, lAttr, op, m.group(6)));
                         clause.addVar(lVar);
-                    }else if(m.group(7)!=null){ // string const
-                        clause.atoms.add(new DCAtom(lVar, lAttr, op, m.group(7)));
+                    }else if(m.group(7)!=null || m.group(8)!=null){ // string const
+                        String sval = (m.group(7)!=null ? m.group(7) : m.group(8));
+                        clause.atoms.add(new DCAtom(lVar, lAttr, op, sval));
                         clause.addVar(lVar);
                     }
                 }
@@ -182,24 +264,98 @@ public class Main {
         return dcs;
     }
 
+    /** 解析 .query 为 BUCQ≠（若失败则返回空，主流程再决定是否回退） */
+    static BUCQ readBUCQ(Path q) throws IOException {
+        BUCQ res = new BUCQ();
+        if(!Files.exists(q)) return res;
+
+        final Pattern ATOM = Pattern.compile(
+                "\\s*(t\\d+)\\.([A-Za-z0-9_ ()%-]+)\\s*(==|!=|<=|>=|=|<|>)\\s*"
+                        + "(?:(t\\d+)\\.([A-Za-z0-9_ ()%-]+)|([+-]?\\d+(?:\\.\\d+)?)|\"([^\"]*)\"|'([^']*)')\\s*"
+        );
+
+        // 读全文件，去掉注释与空行并做 norm
+        List<String> lines = Files.readAllLines(q);
+        boolean hadContent = false;
+        StringBuilder sb = new StringBuilder();
+        for(String line : lines){
+            String t = norm(line);
+            if(t.startsWith("#") || t.isEmpty()) continue;
+            hadContent = true;
+            sb.append(t).append(" ");
+        }
+        String s = norm(sb.toString());
+        if(s.isEmpty()){
+            if(hadContent){
+                System.err.println("[WARN] Query has non-empty lines but became empty after normalization.");
+            }
+            return res;
+        }
+
+        // 只有当“整串”被外层括号完整包裹时才裁
+        if(s.startsWith("¬(") && s.endsWith(")") && isWrappedByWholeParen(s.substring(1)))
+            s = s.substring(2, s.length()-1).trim();
+        if(isWrappedByWholeParen(s))
+            s = s.substring(1, s.length()-1).trim();
+
+        // 顶层按 || 切 BCQ（每个分支外侧可选括号）
+        String[] disj = s.split("\\|\\|");
+        for(String part : disj){
+            String p = norm(part);
+            if(p.isEmpty()) continue;
+            if(isWrappedByWholeParen(p)) p = p.substring(1, p.length()-1).trim();
+
+            String[] atoms = p.split("&&");
+            BCQ bcq = new BCQ();
+            for(String a : atoms){
+                String an = norm(a);
+                Matcher m = ATOM.matcher(an);
+                if(!m.matches()) { bcq.atoms.clear(); break; }
+                String lVar = m.group(1), lAttr = m.group(2).trim(), op = m.group(3);
+                if(m.group(4)!=null){ // tY.attr
+                    String rVar = m.group(4), rAttr = m.group(5).trim();
+                    bcq.atoms.add(new DCAtom(lVar, lAttr, op, rVar, rAttr));
+                    bcq.addVar(lVar); bcq.addVar(rVar);
+                }else if(m.group(6)!=null){ // number
+                    bcq.atoms.add(new DCAtom(lVar, lAttr, op, m.group(6)));
+                    bcq.addVar(lVar);
+                }else if(m.group(7)!=null || m.group(8)!=null){ // string
+                    String sval = (m.group(7)!=null ? m.group(7) : m.group(8));
+                    bcq.atoms.add(new DCAtom(lVar, lAttr, op, sval));
+                    bcq.addVar(lVar);
+                }
+            }
+            if(!bcq.atoms.isEmpty()) res.disj.add(bcq);
+        }
+
+        if(hadContent && res.isEmpty()){
+            System.err.println("[WARN] Query file found and non-empty, but no BCQ/BUCQ atoms were parsed after normalization. "
+                    + "Check quotes/operators/full-width characters or parentheses wrapping.");
+        }
+        return res;
+    }
+
     /** 选择型 query：每行 Attr=val1,val2,...；返回命中的 0-based 行号集合。 */
     static Set<Integer> queryIdx(List<Fact> facts,Path q) throws IOException{
         Set<Integer> idx=new HashSet<>();
         if(!Files.exists(q)) return idx;
         Map<String,Set<String>> cond=new HashMap<>();
+        boolean hadAny = false;
         try(BufferedReader br=Files.newBufferedReader(q)){
             String l;
             while((l=br.readLine())!=null){
-                l=l.trim();
+                l = norm(l);
                 if(l.isEmpty()||l.startsWith("#")) continue;
                 if(!l.contains("=")) continue;
+                hadAny = true;
                 String[] p=l.split("=");
                 String key=p[0].trim();
                 Set<String> vals=new HashSet<>();
-                for(String v: p[1].split(",")) vals.add(v.trim());
+                for(String v: p[1].split(",")) vals.add(norm(v));
                 cond.put(key, vals);
             }
         }
+        if(!hadAny) return idx;
         for(int i=0;i<facts.size();i++){
             Fact f=facts.get(i); boolean ok=true;
             for(String k:cond.keySet()){
@@ -221,6 +377,7 @@ public class Main {
     }
 
     static boolean cmp(String v1, String op, String v2){
+        if(v1==null || v2==null) return false;
         switch(op){
             case "=": case "==": return Objects.equals(v1, v2);
             case "!=": return !Objects.equals(v1, v2);
@@ -269,7 +426,7 @@ public class Main {
     }
 
     /* ------------------------------
-     *     Hyperedges & Graph I/O
+     *  冲突超边（FD/DC） & 图 I/O
      * ------------------------------ */
 
     static class BuildResult {
@@ -284,6 +441,7 @@ public class Main {
         BuildResult res = new BuildResult();
         Set<String> deDup  = new HashSet<>();
 
+        // FD -> 二元超边
         for(int i=0;i<tg.size();i++){
             for(int j=i+1;j<tg.size();j++){
                 Fact f1=tg.get(i), f2=tg.get(j);
@@ -301,6 +459,7 @@ public class Main {
             }
         }
 
+        // DC -> k 元超边
         for(DCClause c: dcs){
             int k = c.vars.size();
             int n = tg.size();
@@ -425,48 +584,14 @@ public class Main {
         }
     }
 
-    /** 新增：把节点总数写到一个旁边的文件里（同名 + _vertex_count.txt） */
+    /** 写一个旁路的顶点计数文件 */
     static void writeVertexCount(Path grOut, Set<Integer> nodes) throws IOException{
         Path f = Path.of(grOut.toString().replace(".gr", "_vertex_count.txt"));
         Files.createDirectories(f.getParent());
         try(BufferedWriter bw = Files.newBufferedWriter(f)){
-            bw.write(String.valueOf(nodes.size())); // 只写一个数字（顶点总数）
+            bw.write(String.valueOf(nodes.size()));
             bw.newLine();
         }
-    }
-
-    /** （保留旧实现但不再调用）写节点映射 */
-    static void writeNodeMap(Path grOut, Set<Integer> nodes, List<Fact> facts) throws IOException{
-        Path mapCsv = Path.of(grOut.toString().replace(".gr", "_node_map.csv"));
-        List<Integer> order = new ArrayList<>(nodes);
-        Collections.sort(order);
-        try(BufferedWriter bw = Files.newBufferedWriter(mapCsv)){
-            bw.write("orig_id,name,director,year,genre,released,writer,star,company"); bw.newLine();
-            for(int origId : order){
-                int idx = origId-1;
-                if(idx<0 || idx>=facts.size()) continue;
-                Fact f = facts.get(idx);
-                bw.write(origId + ","
-                        + csvSafe(f.get("name")) + ","
-                        + csvSafe(f.get("director")) + ","
-                        + csvSafe(f.get("year")) + ","
-                        + csvSafe(f.get("genre")) + ","
-                        + csvSafe(f.get("released")) + ","
-                        + csvSafe(f.get("writer")) + ","
-                        + csvSafe(f.get("star")) + ","
-                        + csvSafe(f.get("company"))
-                ); bw.newLine();
-            }
-        }
-    }
-
-    static String safe(String s){ return s==null? "NULL" : s; }
-    static String csvSafe(String s){
-        if(s==null) return "";
-        if(s.contains(",") || s.contains("\"") || s.contains("\n")){
-            return "\"" + s.replace("\"","\"\"") + "\"";
-        }
-        return s;
     }
 
     static int readTw(Path td) throws IOException{
@@ -489,7 +614,7 @@ public class Main {
         }
     }
 
-    /** 额外新增：写一个综合统计文件（两个图的顶点数） */
+    /** 汇总两个图的顶点数 */
     static void writeGraphsVertexCountsSummary(String base, int conflictCount, int solutionConflictCount) throws IOException{
         Path f = Path.of(OUT_DIR, base + "_vertex_counts.txt");
         Files.createDirectories(f.getParent());
@@ -497,6 +622,149 @@ public class Main {
             bw.write("conflict_graph_vertices=" + conflictCount); bw.newLine();
             bw.write("solution_conflict_graph_vertices=" + solutionConflictCount); bw.newLine();
         }
+    }
+
+    /* ------------------------------
+     *     BCQ/BUCQ → 解超边
+     * ------------------------------ */
+
+    /** 顶层：BUCQ 的所有子 BCQ 的解边并集，随后做极小化 */
+    static List<int[]> buildSolutionHyperedgesBUCQ(List<Fact> facts, BUCQ bu) {
+        List<int[]> out = new ArrayList<>();
+        for(BCQ bcq : bu.disj){
+            out.addAll(evalBCQToWitnesses(facts, bcq));
+        }
+        out = minimizeHyperedges(out);
+        return out;
+    }
+
+    /** 对单个 BCQ 做回溯匹配，返回 witness（使用到的 1-based 原始行号集合） */
+    static List<int[]> evalBCQToWitnesses(List<Fact> facts, BCQ q){
+        // 预筛：每个变量根据“常量比较”的原子得到候选行
+        Map<String, List<Integer>> cand = new HashMap<>();
+        for(String v : q.vars){
+            List<Integer> list = new ArrayList<>();
+            outer: for(int i=0;i<facts.size();i++){
+                Fact f = facts.get(i);
+                for(DCAtom a : q.atoms){
+                    if(!a.lVar.equals(v)) continue;
+                    if(!a.isConst) continue; // 只用常量比较做一元筛选
+                    String v1 = f.get(a.lAttr);
+                    if(v1==null || !cmp(v1, a.op, a.constVal)) continue outer;
+                }
+                list.add(i);
+            }
+            if(list.isEmpty()){ // 某变量无候选，直接空
+                return Collections.emptyList();
+            }
+            cand.put(v, list);
+        }
+
+        List<int[]> res = new ArrayList<>();
+        Map<String,Integer> asg = new HashMap<>(); // var -> row index
+        backtrackBCQ(0, q, facts, cand, asg, res);
+
+        // 归一化：0-based → 1-based, 排序, 去重
+        res = dedupAndNormalize(res);
+        return res;
+    }
+
+    static void backtrackBCQ(int pos, BCQ q, List<Fact> facts,
+                             Map<String,List<Integer>> cand,
+                             Map<String,Integer> asg,
+                             List<int[]> res){
+        if(pos == q.vars.size()){
+            if(allAtomsSat(q.atoms, asg, facts)){
+                TreeSet<Integer> set = new TreeSet<>();
+                for(int r : asg.values()) set.add(r);
+                int[] arr = set.stream().mapToInt(x->x).toArray();
+                res.add(arr);
+            }
+            return;
+        }
+        String v = q.vars.get(pos);
+        for(int idx : cand.get(v)){
+            if(partialOk(v, idx, q.atoms, asg, facts)){
+                asg.put(v, idx);
+                backtrackBCQ(pos+1, q, facts, cand, asg, res);
+                asg.remove(v);
+            }
+        }
+    }
+
+    static boolean allAtomsSat(List<DCAtom> atoms, Map<String,Integer> asg, List<Fact> facts){
+        for(DCAtom a: atoms){
+            Integer li = asg.get(a.lVar);
+            if(li==null) return false;
+            String v1 = facts.get(li).get(a.lAttr);
+            if(v1==null) return false;
+            if(a.isConst){
+                if(!cmp(v1, a.op, a.constVal)) return false;
+            }else{
+                Integer ri = asg.get(a.rVar);
+                if(ri==null) return false;
+                String v2 = facts.get(ri).get(a.rAttr);
+                if(v2==null || !cmp(v1, a.op, v2)) return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean partialOk(String newVar, int newIdx, List<DCAtom> atoms,
+                             Map<String,Integer> asg, List<Fact> facts){
+        Map<String,Integer> tmp = new HashMap<>(asg);
+        tmp.put(newVar, newIdx);
+        for(DCAtom a: atoms){
+            Integer li = tmp.get(a.lVar);
+            if(li==null) continue;
+            if(a.isConst){
+                String v1 = facts.get(li).get(a.lAttr);
+                if(v1==null || !cmp(v1, a.op, a.constVal)) return false;
+            }else{
+                Integer ri = tmp.get(a.rVar);
+                if(ri==null) continue;
+                String v1 = facts.get(li).get(a.lAttr);
+                String v2 = facts.get(ri).get(a.rAttr);
+                if(v1==null || v2==null || !cmp(v1, a.op, v2)) return false;
+            }
+        }
+        return true;
+    }
+
+    static List<int[]> dedupAndNormalize(List<int[]> edges){
+        Set<String> seen = new HashSet<>();
+        List<int[]> out = new ArrayList<>();
+        for(int[] e : edges){
+            int[] x = Arrays.stream(e).map(i->i+1).sorted().toArray();
+            String key = Arrays.toString(x);
+            if(seen.add(key)) out.add(x);
+        }
+        return out;
+    }
+
+    /** 移除任何“为另一条边超集”的超边，保留极小 witness */
+    static List<int[]> minimizeHyperedges(List<int[]> edges){
+        List<int[]> out = new ArrayList<>(edges);
+        out.sort(Comparator.comparingInt(a->a.length)); // 先短后长
+        List<int[]> keep = new ArrayList<>();
+        for(int[] e : out){
+            boolean dominated = false;
+            for(int[] s : keep){
+                if(isSubset(s, e)){ dominated = true; break; }
+            }
+            if(!dominated) keep.add(e);
+        }
+        return keep;
+    }
+
+    static boolean isSubset(int[] small, int[] big){
+        int i=0,j=0;
+        while(i<small.length && j<big.length){
+            if(small[i]==big[j]){ i++; j++; }
+            else if(small[i] > big[j]) j++;
+            else return false;
+        }
+        return i==small.length;
     }
 
     /* ------------------------------
@@ -530,7 +798,7 @@ public class Main {
             Set<Integer> conflictNodes = nodesFromEdges(conflictEdges);
             conflictNodes.addAll(singletonNodes(conflictHypers));
 
-            // 写冲突图 + 节点数（不再写 edge_reasons）
+            // 写冲突图 + 节点数
             Path cg = Path.of(OUT_DIR, base + "_conflict_graph.gr");
             writeGrUsingOriginalIds(conflictEdges, conflictNodes, cg);
             writeVertexCount(cg, conflictNodes);
@@ -548,14 +816,38 @@ public class Main {
                 writeTw(readTw(td), tw);
             }
 
-            // 3) 解超边（选择型查询 → 单点解）
-            Set<Integer> qIdx0 = queryIdx(facts, Path.of(QUERY_DIR, base + ".query"));
+            // 3) 解析 BUCQ/BCQ；若失败且确实像“选择型语法”才回退
             List<int[]> solutionHypers = new ArrayList<>();
             Set<Integer> solutionNodes = new HashSet<>();
-            for(int id: qIdx0){
-                int gid = id + 1; // 原始编号
-                solutionHypers.add(new int[]{gid});
-                solutionNodes.add(gid);
+
+            Path qpath = Path.of(QUERY_DIR, base + ".query");
+            boolean queryFileExists = Files.exists(qpath);
+            String rawQuery = null;
+            if(queryFileExists){
+                rawQuery = String.join("\n", Files.readAllLines(qpath));
+            }
+
+            BUCQ bu = readBUCQ(qpath);
+            if(queryFileExists && !bu.isEmpty()){
+                solutionHypers = buildSolutionHyperedgesBUCQ(facts, bu);
+                for(int[] he : solutionHypers) for(int id : he) solutionNodes.add(id);
+                System.out.println("[INFO] Query parsed as BUCQ (BCQ count=" + bu.disj.size() + "); solution hyperedges = " + solutionHypers.size());
+            } else if(queryFileExists) {
+                Set<Integer> qIdx0 = queryIdx(facts, qpath);
+                if(!qIdx0.isEmpty()){
+                    for(int id: qIdx0){
+                        int gid = id + 1; // 原始编号
+                        solutionHypers.add(new int[]{gid});
+                        solutionNodes.add(gid);
+                    }
+                    System.out.println("[INFO] Query parsed as simple selection; solution nodes = " + solutionNodes.size());
+                } else {
+                    System.err.println("[ERROR] Query file exists but could not be parsed as BCQ/BUCQ nor as selection. "
+                            + "Please check syntax. Content (normalized head): "
+                            + (rawQuery==null? "<null>" : norm(rawQuery).substring(0, Math.min(200, norm(rawQuery).length()))));
+                }
+            } else {
+                System.out.println("[INFO] No query file; skipping solution set.");
             }
 
             // 4) 合并并按 Prop.10 保留与解连通的部分
@@ -587,11 +879,13 @@ public class Main {
                 writeTw(readTw(std), stw);
             }
 
-            // 6) 额外新增：写一个汇总 txt（两个图的顶点数）
+            // 6) 汇总
             writeGraphsVertexCountsSummary(base, conflictNodes.size(), solGraphNodes.size());
         }
     }
 }
+
+
 
 
 

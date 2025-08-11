@@ -1,2 +1,2 @@
-Year=2023
+( t1.Name="Alice" && t1.Year=2023 && t2.Name="Bob" && t2.Year=2023 && t1.Advisor != t2.Advisor)
 

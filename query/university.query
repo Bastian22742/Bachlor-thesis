@@ -1,0 +1,8 @@
+( t1.Name="Alice" && t1.Course="Math101" && t1.Year=2023
+  && t2.Name="Bob" && t2.Course="Math101" && t2.Year=2023
+  && t3.Name="Charlie" && t3.Course="Physics201" && t3.Year=2023 )
+||
+( t1.Name="David" && t1.Grade="B" && t2.Name="Eve" && t2.Grade="C" )
+||
+( t1.Name="Frank" && t1.Department="Mathematics"
+  && t2.Name="Grace" && t2.Department="Chemistry" )

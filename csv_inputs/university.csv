@@ -1,0 +1,16 @@
+StudentID,Name,Course,Grade,Year,Semester,Credits,Professor,Department
+1,Alice,Math101,A,2023,Fall,3,Smith,Mathematics
+2,Alice,Math101,B,2023,Fall,3,Smith,Mathematics
+3,Alice,Physics201,A,2023,Spring,4,Johnson,Physics
+4,Bob,Math101,A,2023,Fall,3,Smith,Mathematics
+5,Bob,Math101,C,2023,Fall,3,Smith,Mathematics
+6,Bob,Chemistry101,B,2023,Spring,3,Brown,Chemistry
+7,Charlie,Physics201,A,2023,Spring,4,Johnson,Physics
+8,Charlie,Physics201,B,2023,Spring,4,Johnson,Physics
+9,David,Math101,B,2023,Fall,3,Smith,Mathematics
+10,David,Chemistry101,A,2023,Spring,3,Brown,Chemistry
+11,Eve,Physics201,C,2023,Spring,4,Johnson,Physics
+12,Frank,Math101,A,2023,Fall,3,Smith,Mathematics
+13,Frank,Physics201,B,2023,Spring,4,Johnson,Physics
+14,Grace,Chemistry101,A,2023,Spring,3,Brown,Chemistry
+15,Henry,Math101,C,2023,Fall,3,Smith,Mathematics
