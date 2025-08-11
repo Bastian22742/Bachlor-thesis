@@ -798,25 +798,12 @@ public class Main {
             Set<Integer> conflictNodes = nodesFromEdges(conflictEdges);
             conflictNodes.addAll(singletonNodes(conflictHypers));
 
-            // 写冲突图 + 节点数
+            // 写冲突图 + 顶点计数
             Path cg = Path.of(OUT_DIR, base + "_conflict_graph.gr");
             writeGrUsingOriginalIds(conflictEdges, conflictNodes, cg);
-            writeVertexCount(cg, conflictNodes);
+            writeVertexCount(cg, conflictNodes); // 保留冲突图的 vertex_counts
 
-            // 2) 在冲突图上跑 Treewidth（空图不跑）
-            Path td = Path.of(OUT_DIR, base + "_result.td");
-            Path tw = Path.of(OUT_DIR, base + "_treewidth.txt");
-            if(conflictNodes.isEmpty()){
-                try(BufferedWriter bw=Files.newBufferedWriter(td)){
-                    bw.write("c empty graph\ns td 0\n"); bw.newLine();
-                }
-                writeTw(0, tw);
-            } else {
-                ExactTW.main(new String[]{cg.toString(), td.toString(), "-acsd"});
-                writeTw(readTw(td), tw);
-            }
-
-            // 3) 解析 BUCQ/BCQ；若失败且确实像“选择型语法”才回退
+            // 2) 解析查询，得到解超边（Es）
             List<int[]> solutionHypers = new ArrayList<>();
             Set<Integer> solutionNodes = new HashSet<>();
 
@@ -850,7 +837,14 @@ public class Main {
                 System.out.println("[INFO] No query file; skipping solution set.");
             }
 
-            // 4) 合并并按 Prop.10 保留与解连通的部分
+            // === 新增：导出 Es 为单独的 .gr（供 DP 使用） ===
+            Set<Long> solutionEdgesGraph = cliqueExpandToEdges(solutionHypers);
+            Set<Integer> solutionGraphNodes = nodesFromEdges(solutionEdgesGraph);
+            solutionGraphNodes.addAll(singletonNodes(solutionHypers));
+            Path solGr = Path.of(OUT_DIR, base + "_solutions_graph.gr");
+            writeGrUsingOriginalIds(solutionEdgesGraph, solutionGraphNodes, solGr);
+
+            // 3) 合并并按 Prop.10 保留与解连通的部分，写解-冲突图（联合图）
             List<int[]> unionHypers = new ArrayList<>();
             unionHypers.addAll(conflictHypers);
             unionHypers.addAll(solutionHypers);
@@ -861,12 +855,11 @@ public class Main {
             solGraphNodes.addAll(reachable);
             solGraphNodes.addAll(solutionNodes);
 
-            // 写解-冲突图 + 节点数
             Path sg = Path.of(OUT_DIR, base + "_solution_conflict_graph.gr");
             writeGrUsingOriginalIds(unionEdges, solGraphNodes, sg);
-            writeVertexCount(sg, solGraphNodes);
+            // 不再写解-冲突图的 vertex_counts 文件
 
-            // 5) 在解-冲突图上跑 Treewidth（空图不跑）
+            // 4) 在解-冲突图上跑 Treewidth（得到 .td，供 DP 用；空图不跑）
             Path std = Path.of(OUT_DIR, base + "_solution_result.td");
             Path stw = Path.of(OUT_DIR, base + "_solution_treewidth.txt");
             if(solGraphNodes.isEmpty()){
@@ -879,7 +872,29 @@ public class Main {
                 writeTw(readTw(std), stw);
             }
 
-            // 6) 汇总
+            // 5) 调用 DP：NUMBERFALSIFY，并落盘结果
+            try {
+                var H  = GraphIO.loadHypergraph(
+                        Path.of(OUT_DIR, base + "_conflict_graph.gr"),   // Ec
+                        Path.of(OUT_DIR, base + "_solutions_graph.gr")   // Es
+                );
+                var TD = GraphIO.loadTreeDecomposition(
+                        Path.of(OUT_DIR, base + "_solution_result.td")   // 联合图（Ec∪Es）的树分解
+                );
+                // 可选：第一次建议打开校验
+                GraphIO.assertEdgeCoverage(H, TD);
+
+                var eng = new Dynmaic_Programming_Based_for_CQA.Engine(H, TD);
+                var falsifyCount = eng.numberFalsify();
+                System.out.println("[CQA] NUMBERFALSIFY(" + base + ") = " + falsifyCount);
+
+                Path outTxt = Path.of(OUT_DIR, base + "_cqa_numberfalsify.txt");
+                Files.writeString(outTxt, falsifyCount.toString());
+            } catch (Exception ex) {
+                System.err.println("[CQA] counting failed for " + base + ": " + ex.getMessage());
+            }
+
+            // 6) 汇总（保持原有的汇总文件）
             writeGraphsVertexCountsSummary(base, conflictNodes.size(), solGraphNodes.size());
         }
     }
