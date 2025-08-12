@@ -60,30 +60,35 @@ public class Main {
     /* ---------- Query Atom for GGM ---------- */
     static class QueryAtomGGM {
         int atomIndex;  // q_i的索引
-        Map<String, String> conditions; // 具体的属性值条件
-        List<String> terms; // 完整的项列表，对应查询中的每个位置
+        Map<String, String> constantConditions; // 具体的属性值条件
+        Map<String, String> variableBindings;   // 属性 -> 变量名
+        String atomName;  // 用于调试
 
-        QueryAtomGGM(int atomIndex, Map<String, String> conditions, List<String> terms) {
+        QueryAtomGGM(int atomIndex, String atomName) {
             this.atomIndex = atomIndex;
-            this.conditions = conditions;
-            this.terms = terms;
+            this.atomName = atomName;
+            this.constantConditions = new HashMap<>();
+            this.variableBindings = new HashMap<>();
+        }
+
+        void addConstantCondition(String attribute, String value) {
+            constantConditions.put(attribute, value);
+        }
+
+        void addVariableBinding(String attribute, String variable) {
+            variableBindings.put(attribute, variable);
         }
 
         // 获取所有变量
         Set<String> getVariables() {
-            Set<String> vars = new HashSet<>();
-            for(String term : terms) {
-                if(isVariable(term)) {
-                    vars.add(term);
-                }
-            }
+            Set<String> vars = new HashSet<>(variableBindings.values());
             return vars;
         }
 
         boolean matchesFact(Fact fact, String[] headers) {
-            // 首先检查固定条件
-            for(String attr : conditions.keySet()) {
-                String requiredValue = conditions.get(attr);
+            // 检查常量条件
+            for(String attr : constantConditions.keySet()) {
+                String requiredValue = constantConditions.get(attr);
                 String actualValue = fact.get(attr);
                 if(actualValue == null || !actualValue.equals(requiredValue)) {
                     return false;
@@ -92,9 +97,22 @@ public class Main {
             return true;
         }
 
+        // 从事实中提取变量绑定
+        Map<String, String> extractVariableBindings(Fact fact) {
+            Map<String, String> bindings = new HashMap<>();
+            for(String attr : variableBindings.keySet()) {
+                String variable = variableBindings.get(attr);
+                String value = fact.get(attr);
+                if(value != null) {
+                    bindings.put(variable, value);
+                }
+            }
+            return bindings;
+        }
+
         @Override
         public String toString() {
-            return "q" + atomIndex + conditions.toString() + " terms:" + terms;
+            return atomName + ": constants=" + constantConditions + ", variables=" + variableBindings;
         }
     }
 
@@ -146,6 +164,101 @@ public class Main {
         @Override
         public String toString() {
             return "Query atoms: " + queryAtoms + ", Constraints: " + variableConstraints;
+        }
+    }
+
+    /* ---------- Conjunctive Query (复用SCG的逻辑) ---------- */
+    static class ConjunctiveQuery {
+        List<QueryAtomGGM> atoms;
+        List<VariableConstraint> variableConstraints;
+
+        ConjunctiveQuery(List<QueryAtomGGM> atoms, List<VariableConstraint> variableConstraints) {
+            this.atoms = atoms;
+            this.variableConstraints = variableConstraints;
+        }
+
+        // 检查给定的事实集合是否满足这个合取查询
+        boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices, String[] headers) {
+            // 为每个原子找到匹配的事实
+            List<List<Integer>> atomMatches = new ArrayList<>();
+
+            for(QueryAtomGGM atom : atoms) {
+                List<Integer> matches = new ArrayList<>();
+                for(Integer idx : indices) {
+                    Fact fact = facts.get(idx);
+                    if(atom.matchesFact(fact, headers)) {
+                        matches.add(idx);
+                    }
+                }
+                atomMatches.add(matches);
+
+                // 如果某个原子没有匹配的事实，则整个查询失败
+                if(matches.isEmpty()) {
+                    return false;
+                }
+            }
+
+            // 尝试所有可能的变量绑定组合
+            return tryAllCombinations(atomMatches, 0, new ArrayList<>(), facts);
+        }
+
+        private boolean tryAllCombinations(List<List<Integer>> atomMatches, int atomIndex,
+                                           List<Integer> currentAssignment, List<Fact> facts) {
+            if(atomIndex == atomMatches.size()) {
+                // 检查当前分配是否满足所有变量约束
+                return checkVariableConstraints(currentAssignment, facts);
+            }
+
+            // 尝试当前原子的所有可能匹配
+            for(Integer factIndex : atomMatches.get(atomIndex)) {
+                currentAssignment.add(factIndex);
+                if(tryAllCombinations(atomMatches, atomIndex + 1, currentAssignment, facts)) {
+                    return true;
+                }
+                currentAssignment.remove(currentAssignment.size() - 1);
+            }
+
+            return false;
+        }
+
+        private boolean checkVariableConstraints(List<Integer> factIndices, List<Fact> facts) {
+            // 收集所有变量绑定
+            Map<String, String> allBindings = new HashMap<>();
+
+            for(int i = 0; i < factIndices.size(); i++) {
+                Integer factIndex = factIndices.get(i);
+                Fact fact = facts.get(factIndex);
+                QueryAtomGGM atom = atoms.get(i);
+
+                Map<String, String> atomBindings = atom.extractVariableBindings(fact);
+
+                // 检查变量绑定的一致性
+                for(String variable : atomBindings.keySet()) {
+                    String value = atomBindings.get(variable);
+                    if(allBindings.containsKey(variable)) {
+                        // 如果变量已经有绑定，检查是否一致
+                        if(!allBindings.get(variable).equals(value)) {
+                            return false;  // 变量绑定不一致
+                        }
+                    } else {
+                        allBindings.put(variable, value);
+                    }
+                }
+            }
+
+            // 检查所有变量约束
+            for(VariableConstraint constraint : variableConstraints) {
+                if(!constraint.isSatisfied(allBindings)) {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        @Override
+        public String toString() {
+            return atoms.toString() + " with constraints: " + variableConstraints.toString();
         }
     }
 
@@ -377,7 +490,7 @@ public class Main {
         return true;
     }
 
-    /* ---------- 查询解析 (新的GGM版本) ---------- */
+    /* ---------- 改进的查询解析 (兼容SCG格式) ---------- */
     static ParsedQuery parseQueryForGGM(Path queryPath, String[] headers) throws IOException {
         if(!Files.exists(queryPath)) {
             System.out.println("Query file does not exist: " + queryPath);
@@ -401,7 +514,12 @@ public class Main {
             }
 
             System.out.println("Parsing query for GGM: " + query);
-            return parseRelationalQueryForGGM(query, headers);
+
+            if(query.contains("R(") || query.contains("T(")) {
+                return parseRelationalQueryForGGM(query, headers);
+            } else {
+                return parseAttributeValueQueryForGGM(query);
+            }
         }
     }
 
@@ -409,43 +527,59 @@ public class Main {
         List<QueryAtomGGM> queryAtoms = new ArrayList<>();
         List<VariableConstraint> variableConstraints = new ArrayList<>();
 
-        // 解析关系原子 R(...) 和 T(...)
+        // 解析关系原子 R(...) 或 T(...)
         Pattern relationPattern = Pattern.compile("([RT])\\(([^)]+)\\)");
         Matcher matcher = relationPattern.matcher(query);
 
         int atomIndex = 0;
-        while(matcher.find()) {
+        while (matcher.find()) {
             String relationName = matcher.group(1);
-            String params = matcher.group(2);
-            String[] values = params.split(",");
+            String params = matcher.group(2).trim();
+            QueryAtomGGM atom = new QueryAtomGGM(atomIndex, "Atom" + atomIndex);
 
-            Map<String, String> conditions = new HashMap<>();
-            List<String> terms = new ArrayList<>();
+            // 判断是否为命名参数模式
+            if (params.contains("=")) {
+                // 命名参数模式: Attr = value
+                String[] parts = params.split(",");
+                for (String part : parts) {
+                    part = part.trim();
+                    if (part.contains("=")) {
+                        String[] kv = part.split("=", 2);
+                        String attr = kv[0].trim();
+                        String value = cleanValue(kv[1].trim());
 
-            for(int i = 0; i < values.length; i++) {
-                String value = cleanValue(values[i].trim());
-                terms.add(value); // 保存完整的项列表
-
-                if(!isVariable(value) && !isWildcard(value) && !value.isEmpty() && i < headers.length) {
-                    conditions.put(headers[i], value);
+                        if (isVariable(value)) {
+                            atom.addVariableBinding(attr, value);
+                        } else if (!value.isEmpty()) {
+                            atom.addConstantCondition(attr, value);
+                        }
+                    }
+                }
+            } else {
+                // 位置参数模式：按位置对应 headers
+                String[] values = params.split(",");
+                for (int i = 0; i < values.length && i < headers.length; i++) {
+                    String value = cleanValue(values[i].trim());
+                    if (isVariable(value)) {
+                        atom.addVariableBinding(headers[i], value);
+                    } else if (!value.isEmpty()) {
+                        atom.addConstantCondition(headers[i], value);
+                    }
                 }
             }
 
-            QueryAtomGGM queryAtom = new QueryAtomGGM(atomIndex, conditions, terms);
-            queryAtoms.add(queryAtom);
-            System.out.println("  Parsed query atom " + atomIndex + ": " + queryAtom);
+            queryAtoms.add(atom);
+            System.out.println("  Parsed query atom " + atomIndex + ": " + atom);
             atomIndex++;
         }
 
-        // 解析变量约束 (x1 != y1), (x1 = y1) 等
+        // 解析变量约束
         Pattern constraintPattern = Pattern.compile("\\(\\s*(\\w+)\\s*([!=<>]+)\\s*(\\w+)\\s*\\)");
         Matcher constraintMatcher = constraintPattern.matcher(query);
-
-        while(constraintMatcher.find()) {
+        while (constraintMatcher.find()) {
             String leftVar = constraintMatcher.group(1);
             String operator = constraintMatcher.group(2);
             String rightVar = constraintMatcher.group(3);
-
             variableConstraints.add(new VariableConstraint(leftVar, operator, rightVar));
             System.out.println("  Parsed variable constraint: " + leftVar + " " + operator + " " + rightVar);
         }
@@ -453,19 +587,120 @@ public class Main {
         return new ParsedQuery(queryAtoms, variableConstraints);
     }
 
-    static boolean isWildcard(String value) {
-        if (value == null || value.isEmpty()) return false;
-        return value.equals("_") || value.equals("*");
+    static ParsedQuery parseAttributeValueQueryForGGM(String query) {
+        List<QueryAtomGGM> queryAtoms = new ArrayList<>();
+        List<VariableConstraint> variableConstraints = new ArrayList<>();
+
+        String[] orParts = query.split("\\|\\|");
+
+        int atomIndex = 0;
+        for(String orPart : orParts) {
+            orPart = orPart.trim();
+
+            List<Map<String, String>> alternatives = expandAlternatives(orPart);
+
+            for(Map<String, String> conditions : alternatives) {
+                if(!conditions.isEmpty()) {
+                    QueryAtomGGM atom = new QueryAtomGGM(atomIndex, "SimpleAtom" + atomIndex);
+                    for(String attr : conditions.keySet()) {
+                        atom.addConstantCondition(attr, conditions.get(attr));
+                    }
+                    queryAtoms.add(atom);
+                    System.out.println("  Parsed attribute-value query atom " + atomIndex + ": " + conditions);
+                    atomIndex++;
+                }
+            }
+        }
+
+        return new ParsedQuery(queryAtoms, variableConstraints);
     }
 
-    // 修改：isVariable函数现在排除通配符
+    static List<Map<String, String>> expandAlternatives(String queryPart) {
+        List<Map<String, String>> result = new ArrayList<>();
+        Map<String, String> baseConditions = new HashMap<>();
+
+        Pattern bracketPattern = Pattern.compile("\\(([^)]+)\\)");
+        Matcher matcher = bracketPattern.matcher(queryPart);
+
+        List<List<Map.Entry<String, String>>> alternativeGroups = new ArrayList<>();
+
+        String withoutBrackets = queryPart;
+        while(matcher.find()) {
+            String bracketContent = matcher.group(1);
+            List<Map.Entry<String, String>> alternatives = new ArrayList<>();
+
+            String[] choices = bracketContent.split("\\|\\|");
+            for(String choice : choices) {
+                choice = choice.trim();
+                if(choice.contains("=")) {
+                    String[] parts = choice.split("=", 2);
+                    if(parts.length == 2) {
+                        alternatives.add(new AbstractMap.SimpleEntry<>(
+                                parts[0].trim(), cleanValue(parts[1].trim())
+                        ));
+                    }
+                }
+            }
+
+            if(!alternatives.isEmpty()) {
+                alternativeGroups.add(alternatives);
+            }
+
+            withoutBrackets = withoutBrackets.replace(matcher.group(0), "");
+        }
+
+        String[] baseParts = withoutBrackets.split("&&");
+        for(String part : baseParts) {
+            part = part.trim();
+            if(part.contains("=")) {
+                String[] kv = part.split("=", 2);
+                if(kv.length == 2) {
+                    baseConditions.put(kv[0].trim(), cleanValue(kv[1].trim()));
+                }
+            }
+        }
+
+        if(alternativeGroups.isEmpty()) {
+            result.add(baseConditions);
+        } else {
+            generateCartesianProduct(baseConditions, alternativeGroups, 0,
+                    new HashMap<>(), result);
+        }
+
+        return result;
+    }
+
+    static void generateCartesianProduct(Map<String, String> baseConditions,
+                                         List<List<Map.Entry<String, String>>> alternativeGroups,
+                                         int groupIndex,
+                                         Map<String, String> current,
+                                         List<Map<String, String>> result) {
+        if(groupIndex == alternativeGroups.size()) {
+            Map<String, String> finalConditions = new HashMap<>(baseConditions);
+            finalConditions.putAll(current);
+            result.add(finalConditions);
+            return;
+        }
+
+        List<Map.Entry<String, String>> currentGroup = alternativeGroups.get(groupIndex);
+        for(Map.Entry<String, String> choice : currentGroup) {
+            Map<String, String> newCurrent = new HashMap<>(current);
+            newCurrent.put(choice.getKey(), choice.getValue());
+            generateCartesianProduct(baseConditions, alternativeGroups,
+                    groupIndex + 1, newCurrent, result);
+        }
+    }
+
     static boolean isVariable(String value) {
-        if (value == null || value.isEmpty()) return false;
-        // "_" 和 "*" 是通配符，不作为需绑定的变量
-        if (isWildcard(value)) return false;
-        return value.matches("^[a-z][0-9]*$");
+        if(value == null || value.isEmpty()) return false;
+        if ((value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+            return false;
+        }
+        return value.equals("_") ||
+                value.equals("*") ||
+                value.matches("^[a-z][0-9]*$");       // var, var1, etc.
     }
-
 
     static String cleanValue(String value) {
         if(value == null) return null;
@@ -477,9 +712,9 @@ public class Main {
         return value;
     }
 
-    /* ---------- GGM Join边计算 ---------- */
+    /* ---------- GGM Join边计算 (修正版本) ---------- */
 
-    // 检查两个查询原子是否q-linked (修正版本)
+    // 检查两个查询原子是否q-linked
     static boolean areQueryAtomsLinked(QueryAtomGGM atom1, QueryAtomGGM atom2,
                                        List<VariableConstraint> variableConstraints) {
         System.out.println("    Checking if q" + atom1.atomIndex + " and q" + atom2.atomIndex + " are q-linked:");
@@ -490,7 +725,7 @@ public class Main {
             return true;
         }
 
-        // 条件2: 变量有交集 (修正：应该是不为空的交集)
+        // 条件2: 变量有交集
         Set<String> vars1 = atom1.getVariables();
         Set<String> vars2 = atom2.getVariables();
         Set<String> intersection = new HashSet<>(vars1);
@@ -520,61 +755,35 @@ public class Main {
         return false;
     }
 
-    // 检查两个事实是否q-consistent (修正版本)
+    // 检查两个事实是否q-consistent
     static boolean areFactsQConsistent(Fact fact1, Fact fact2, QueryAtomGGM atom1, QueryAtomGGM atom2,
                                        List<VariableConstraint> variableConstraints, String[] headers) {
 
-        System.out.println("        Checking q-consistency for facts:");
-        System.out.println("          fact1: " + fact1);
-        System.out.println("          fact2: " + fact2);
-        System.out.println("          atom1.terms: " + atom1.terms);
-        System.out.println("          atom2.terms: " + atom2.terms);
-
         // 首先检查基本匹配
         if(!atom1.matchesFact(fact1, headers)) {
-            System.out.println("          Fact1 doesn't match atom1 conditions");
             return false;
         }
         if(!atom2.matchesFact(fact2, headers)) {
-            System.out.println("          Fact2 doesn't match atom2 conditions");
             return false;
         }
-        System.out.println("          Both facts match their atom conditions");
 
         // 建立变量绑定
         Map<String, String> variableBindings = new HashMap<>();
 
         // 为atom1建立变量绑定
-        for(int i = 0; i < atom1.terms.size() && i < headers.length; i++) {
-            String term = atom1.terms.get(i);
-            if(isVariable(term)) {
-                String value = fact1.get(headers[i]);
-                if(value != null) {
-                    variableBindings.put(term, value);
-                    System.out.println("          Binding " + term + " = " + value + " (from atom1, position " + i + ")");
-                }
-            }
-        }
+        Map<String, String> bindings1 = atom1.extractVariableBindings(fact1);
+        variableBindings.putAll(bindings1);
 
         // 为atom2建立变量绑定，检查冲突
-        for(int i = 0; i < atom2.terms.size() && i < headers.length; i++) {
-            String term = atom2.terms.get(i);
-            if(isVariable(term)) {
-                String value = fact2.get(headers[i]);
-                if(value != null) {
-                    String existingValue = variableBindings.get(term);
-                    if(existingValue != null && !existingValue.equals(value)) {
-                        System.out.println("          Variable binding conflict for " + term +
-                                ": " + existingValue + " vs " + value);
-                        return false; // 变量绑定冲突
-                    }
-                    variableBindings.put(term, value);
-                    System.out.println("          Binding " + term + " = " + value + " (from atom2, position " + i + ")");
-                }
+        Map<String, String> bindings2 = atom2.extractVariableBindings(fact2);
+        for(String var : bindings2.keySet()) {
+            String value = bindings2.get(var);
+            String existingValue = variableBindings.get(var);
+            if(existingValue != null && !existingValue.equals(value)) {
+                return false; // 变量绑定冲突
             }
+            variableBindings.put(var, value);
         }
-
-        System.out.println("          Variable bindings: " + variableBindings);
 
         // 检查所有相关的变量约束
         for(VariableConstraint constraint : variableConstraints) {
@@ -586,19 +795,11 @@ public class Main {
             boolean constraintInvolvesAtom2 = vars2.contains(constraint.leftVar) || vars2.contains(constraint.rightVar);
 
             if(constraintInvolvesAtom1 && constraintInvolvesAtom2) {
-                System.out.println("          Checking constraint: " + constraint);
-                System.out.println("            " + constraint.leftVar + " = " + variableBindings.get(constraint.leftVar));
-                System.out.println("            " + constraint.rightVar + " = " + variableBindings.get(constraint.rightVar));
-
                 if(!constraint.isSatisfied(variableBindings)) {
-                    System.out.println("          Constraint not satisfied");
                     return false;
                 }
-                System.out.println("          Constraint satisfied");
             }
         }
-
-        System.out.println("          Facts are q-consistent");
         return true;
     }
 
@@ -686,7 +887,7 @@ public class Main {
         }
         System.out.println("  Added " + conflictEdges + " Conflict edges");
 
-        // 2. 添加Join边 (修正版本)
+        // 2. 添加Join边
         System.out.println("  Adding Join edges...");
         int totalJoinEdges = 0;
 
@@ -700,11 +901,9 @@ public class Main {
 
                 // 检查这两个原子是否q-linked
                 if(!areQueryAtomsLinked(atom1, atom2, parsedQuery.variableConstraints)) {
-                    System.out.println("    Atoms are not q-linked, skipping");
                     continue;
                 }
 
-                System.out.println("    Atoms are q-linked, finding q-consistent fact pairs");
                 int joinEdgesForThisPair = 0;
 
                 // 找到所有匹配atom1的事实
@@ -735,8 +934,6 @@ public class Main {
                         Fact fact2 = facts.get(factIdx2);
 
                         System.out.println("      Checking fact pair (" + factIdx1 + "," + factIdx2 + ")");
-                        System.out.println("        Fact " + factIdx1 + ": " + fact1);
-                        System.out.println("        Fact " + factIdx2 + ": " + fact2);
 
                         if(areFactsQConsistent(fact1, fact2, atom1, atom2,
                                 parsedQuery.variableConstraints, headers)) {
@@ -784,8 +981,6 @@ public class Main {
             }
         }
 
-        System.out.println("GGM graph written to: " + out);
-
         // 4. 输出图的详细信息
         outputGGMGraphStatistics(facts, parsedQuery, conflictEdges, totalJoinEdges);
     }
@@ -799,33 +994,6 @@ public class Main {
         System.out.println("Conflict edges: " + conflictEdges);
         System.out.println("Join edges: " + joinEdges);
         System.out.println("Total edges: " + (conflictEdges + joinEdges));
-        System.out.println("Query atoms: " + parsedQuery.queryAtoms.size());
-        System.out.println("Variable constraints: " + parsedQuery.variableConstraints.size());
-
-        System.out.println("\nQuery atoms details:");
-        for(int i = 0; i < parsedQuery.queryAtoms.size(); i++) {
-            QueryAtomGGM atom = parsedQuery.queryAtoms.get(i);
-            System.out.println("  q" + i + ": " + atom);
-            System.out.println("    Variables: " + atom.getVariables());
-        }
-
-        System.out.println("\nVariable constraints:");
-        for(VariableConstraint constraint : parsedQuery.variableConstraints) {
-            System.out.println("  " + constraint);
-        }
-
-        // 计算q-linked关系
-        System.out.println("\nq-linked atom pairs:");
-        for(int i = 0; i < parsedQuery.queryAtoms.size(); i++) {
-            for(int j = i; j < parsedQuery.queryAtoms.size(); j++) {
-                QueryAtomGGM atom1 = parsedQuery.queryAtoms.get(i);
-                QueryAtomGGM atom2 = parsedQuery.queryAtoms.get(j);
-                if(areQueryAtomsLinked(atom1, atom2, parsedQuery.variableConstraints)) {
-                    System.out.println("  q" + i + " and q" + j + " are q-linked");
-                }
-            }
-        }
-        System.out.println("===============================================\n");
     }
 
     /* ---------- Main方法 ---------- */
@@ -863,7 +1031,7 @@ public class Main {
                 System.out.println("    DC" + (i+1) + ": " + dcs.get(i));
             }
 
-            // 解析查询（新的GGM版本）
+            // 解析查询（现在兼容SCG格式）
             ParsedQuery parsedQuery = parseQueryForGGM(Path.of(QUERY_DIR, baseName + ".q"), headers);
 
             if(parsedQuery.queryAtoms.isEmpty()) {

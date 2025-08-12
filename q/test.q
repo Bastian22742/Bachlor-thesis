@@ -1,2 +1,4 @@
-
-R(_, x, "CS101", "A",_,_) && R(_, x, "MATH101", y1,_,_) && R(_, x, "PHYS101", y2,_,_) &&(y1 != y2)
+R(StudentName = x,Course = "CS101",Grade = "A") &&
+R(StudentName = x,Course = "MATH101",Grade = y1) &&
+R(StudentName = x,Course = "PHYS101",Grade = y2) &&
+(y1 != y2)
