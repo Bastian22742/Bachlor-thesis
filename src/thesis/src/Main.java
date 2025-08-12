@@ -382,7 +382,7 @@ public class Main {
             this.variableConstraints = variableConstraints;
         }
 
-        // 检查给定的事实集合是否满足这个合取查询
+        // 修复后的 isSatisfiedBy 方法，允许事实重用
         boolean isSatisfiedBy(List<Fact> facts, Set<Integer> indices, String[] headers) {
             // 为每个原子找到匹配的事实
             List<List<Integer>> atomMatches = new ArrayList<>();
@@ -403,29 +403,34 @@ public class Main {
                 }
             }
 
-            // 尝试所有可能的变量绑定组合
-            return tryAllCombinations(atomMatches, 0, new ArrayList<>(), facts);
+            // 尝试所有可能的变量绑定组合（允许重用事实）
+            return tryAllCombinationsWithReuse(atomMatches, 0, new ArrayList<>(), facts, indices);
         }
 
-        private boolean tryAllCombinations(List<List<Integer>> atomMatches, int atomIndex,
-                                           List<Integer> currentAssignment, List<Fact> facts) {
+        // 新增：允许事实重用的组合尝试方法
+        private boolean tryAllCombinationsWithReuse(List<List<Integer>> atomMatches, int atomIndex,
+                                                    List<Integer> currentAssignment, List<Fact> facts,
+                                                    Set<Integer> availableIndices) {
             if(atomIndex == atomMatches.size()) {
                 // 检查当前分配是否满足所有变量约束
                 return checkVariableConstraints(currentAssignment, facts);
             }
 
-            // 尝试当前原子的所有可能匹配
+            // 尝试当前原子的所有可能匹配（只考虑可用的索引）
             for(Integer factIndex : atomMatches.get(atomIndex)) {
-                currentAssignment.add(factIndex);
-                if(tryAllCombinations(atomMatches, atomIndex + 1, currentAssignment, facts)) {
-                    return true;
+                if(availableIndices.contains(factIndex)) {
+                    currentAssignment.add(factIndex);
+                    if(tryAllCombinationsWithReuse(atomMatches, atomIndex + 1, currentAssignment, facts, availableIndices)) {
+                        return true;
+                    }
+                    currentAssignment.remove(currentAssignment.size() - 1);
                 }
-                currentAssignment.remove(currentAssignment.size() - 1);
             }
 
             return false;
         }
 
+        // 修复后的变量约束检查方法
         private boolean checkVariableConstraints(List<Integer> factIndices, List<Fact> facts) {
             // 收集所有变量绑定
             Map<String, String> allBindings = new HashMap<>();
@@ -482,18 +487,12 @@ public class Main {
             return minimalSets;
         }
 
-        System.out.println("Parsed " + queries.size() + " conjunctive queries");
-
         // 对于每个合取查询，找到最小满足集合
         for(int queryIdx = 0; queryIdx < queries.size(); queryIdx++) {
             ConjunctiveQuery query = queries.get(queryIdx);
-            System.out.println("Finding minimal solution sets for query " + (queryIdx + 1) + ": " + query);
-
             List<Set<Integer>> queryMinimalSets = findMinimalSetsForQuery(facts, query, headers);
 
-            System.out.println("  Found " + queryMinimalSets.size() + " minimal sets for this query");
             for(int i = 0; i < queryMinimalSets.size(); i++) {
-                System.out.println("    Minimal set " + (i+1) + ": " + queryMinimalSets.get(i));
             }
 
             minimalSets.addAll(queryMinimalSets);
@@ -517,26 +516,25 @@ public class Main {
         return uniqueMinimalSets;
     }
 
-    // 为单个查询找到最小满足集合
+    // 修复后的 findMinimalSetsForQuery 方法
     static List<Set<Integer>> findMinimalSetsForQuery(List<Fact> facts, ConjunctiveQuery query, String[] headers) {
         List<Set<Integer>> minimalSets = new ArrayList<>();
         int n = facts.size();
 
-        // 按大小递增搜索，找到满足查询的最小集合
-        for(int size = query.atoms.size(); size <= n; size++) {  // 至少需要和原子数量一样多的事实
-            System.out.println("    Checking sets of size " + size + "...");
+        // 从大小1开始搜索，而不是从原子数量开始
+        // 因为一条记录可能同时满足多个原子
+        for(int size = 1; size <= n; size++) {
             List<Set<Integer>> currentSizeSets = new ArrayList<>();
 
             generateCombinations(facts, query, size, 0, new ArrayList<>(), currentSizeSets, headers);
 
             if(!currentSizeSets.isEmpty()) {
-                System.out.println("    Found " + currentSizeSets.size() + " satisfying sets of size " + size);
 
                 // 检查是否为最小集合（没有真子集也满足查询）
                 for(Set<Integer> candidate : currentSizeSets) {
                     boolean isMinimal = true;
 
-                    // 检查所有真子集
+                    // 检查是否有已找到的更小集合是当前候选集合的子集
                     for(Set<Integer> existing : minimalSets) {
                         if(candidate.containsAll(existing)) {
                             isMinimal = false;
@@ -550,6 +548,7 @@ public class Main {
                 }
 
                 // 如果找到了满足条件的集合，不需要检查更大的集合
+                // 因为我们已经按大小递增搜索了
                 if(!minimalSets.isEmpty()) {
                     break;
                 }
@@ -610,33 +609,47 @@ public class Main {
 
         String[] disjunctStrs = query.split("[∨]|\\|\\|");
 
-        for(String disjunctStr : disjunctStrs) {
+        for (String disjunctStr : disjunctStrs) {
             disjunctStr = disjunctStr.trim();
             List<QueryAtom> atoms = new ArrayList<>();
             List<VariableConstraint> variableConstraints = new ArrayList<>();
 
-            // 解析关系原子 R(...) 和 T(...)
             Pattern relationPattern = Pattern.compile("[RT]\\(([^)]+)\\)");
             Matcher matcher = relationPattern.matcher(disjunctStr);
 
             int atomIndex = 0;
-            while(matcher.find()) {
-                String params = matcher.group(1);
-                String[] values = params.split(",");
-
+            while (matcher.find()) {
+                String params = matcher.group(1).trim();
                 QueryAtom atom = new QueryAtom("Atom" + atomIndex);
 
-                for(int i = 0; i < values.length && i < headers.length; i++) {
-                    String value = cleanValue(values[i].trim());
+                // 判断是否为命名参数模式
+                if (params.contains("=")) {
+                    // 命名参数模式: Attr = value
+                    String[] parts = params.split(",");
+                    for (String part : parts) {
+                        part = part.trim();
+                        if (part.contains("=")) {
+                            String[] kv = part.split("=", 2);
+                            String attr = kv[0].trim();
+                            String value = cleanValue(kv[1].trim());
 
-                    if(isVariable(value)) {
-                        // 这是一个变量
-                        atom.addVariableBinding(headers[i], value);
-                        System.out.println("  Variable binding: " + headers[i] + " -> " + value);
-                    } else if(!value.isEmpty()) {
-                        // 这是一个常量
-                        atom.addConstantCondition(headers[i], value);
-                        System.out.println("  Constant condition: " + headers[i] + " = " + value);
+                            if (isVariable(value)) {
+                                atom.addVariableBinding(attr, value);
+                            } else if (!value.isEmpty()) {
+                                atom.addConstantCondition(attr, value);
+                            }
+                        }
+                    }
+                } else {
+                    // 位置参数模式（原逻辑）
+                    String[] values = params.split(",");
+                    for (int i = 0; i < values.length && i < headers.length; i++) {
+                        String value = cleanValue(values[i].trim());
+                        if (isVariable(value)) {
+                            atom.addVariableBinding(headers[i], value);
+                        } else if (!value.isEmpty()) {
+                            atom.addConstantCondition(headers[i], value);
+                        }
                     }
                 }
 
@@ -644,26 +657,24 @@ public class Main {
                 atomIndex++;
             }
 
-            // 解析变量约束 (x1 != y1), (x1 = y1) 等
+            // 解析变量约束
             Pattern constraintPattern = Pattern.compile("\\(\\s*(\\w+)\\s*([!=<>]+)\\s*(\\w+)\\s*\\)");
             Matcher constraintMatcher = constraintPattern.matcher(disjunctStr);
-
-            while(constraintMatcher.find()) {
+            while (constraintMatcher.find()) {
                 String leftVar = constraintMatcher.group(1);
                 String operator = constraintMatcher.group(2);
                 String rightVar = constraintMatcher.group(3);
-
                 variableConstraints.add(new VariableConstraint(leftVar, operator, rightVar));
-                System.out.println("  Parsed variable constraint: " + leftVar + " " + operator + " " + rightVar);
             }
 
-            if(!atoms.isEmpty()) {
+            if (!atoms.isEmpty()) {
                 disjuncts.add(new ConjunctiveQuery(atoms, variableConstraints));
             }
         }
 
         return disjuncts;
     }
+
 
     static List<ConjunctiveQuery> parseAttributeValueUCQ(String query) {
         List<ConjunctiveQuery> disjuncts = new ArrayList<>();
@@ -770,7 +781,11 @@ public class Main {
     }
 
     static boolean isVariable(String value) {
-        if(value == null || value.isEmpty()) return true;
+        if(value == null || value.isEmpty()) return false;
+        if ((value.startsWith("\"") && value.endsWith("\"")) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+            return false;
+        }
         return value.equals("_") ||
                 value.equals("*") ||
                 value.matches("^[a-z][0-9]*$");       // var, var1, VAR, VAR1 等
@@ -837,8 +852,7 @@ public class Main {
                 for(var fd : fds) {
                     if(violatesFD(fd.getKey(), fd.getValue(), f1, f2)) {
                         hasConflict = true;
-                        System.out.println("    FD conflict between facts " + i + " and " + j +
-                                " (FD: " + fd.getKey() + " -> " + fd.getValue() + ")");
+                        System.out.println("    FD conflict between facts " + i + " and " + j );
                         break;
                     }
                 }
@@ -849,8 +863,7 @@ public class Main {
                         var dc = dcs.get(dcIdx);
                         if(violatesDC(dc, f1, f2, i, j)) {
                             hasConflict = true;
-                            System.out.println("    DC conflict between facts " + i + " and " + j +
-                                    " (DC " + dcIdx + ")");
+                            System.out.println("    DC conflict between facts " + i + " and " + j );
                             break;
                         }
                     }
@@ -919,8 +932,6 @@ public class Main {
             }
         }
 
-        System.out.println("Solution-conflict graph written to: " + out);
-
         // 4. 输出图的详细信息
         outputGraphStatistics(facts, minimalSolutionSets, conflictEdges, solutionEdges);
     }
@@ -935,24 +946,6 @@ public class Main {
         System.out.println("Solution edges: " + solutionEdges);
         System.out.println("Total edges: " + (conflictEdges + solutionEdges));
         System.out.println("Solution hyperedges: " + minimalSolutionSets.size());
-
-        System.out.println("\nDetailed solution hyperedges:");
-        for(int i = 0; i < minimalSolutionSets.size(); i++) {
-            Set<Integer> solutionSet = minimalSolutionSets.get(i);
-            System.out.println("  Hyperedge " + (i+1) + ": " + solutionSet +
-                    " (size=" + solutionSet.size() + ", edges=" +
-                    (solutionSet.size() * (solutionSet.size()-1) / 2) + ")");
-
-            // 显示涉及的事实内容
-            System.out.println("    Facts involved:");
-            for(Integer idx : solutionSet) {
-                if(idx < facts.size()) {
-                    Fact fact = facts.get(idx);
-                    System.out.println("      [" + idx + "] " + fact);
-                }
-            }
-        }
-        System.out.println("==========================================\n");
     }
 
 
@@ -1006,8 +999,6 @@ public class Main {
                 minimalSolutionSets = new ArrayList<>();
             }
 
-            System.out.println("\nFinal minimal solution sets: " + minimalSolutionSets.size());
-
             // 生成解冲突图
             Path graphPath = Path.of(OUT_DIR, baseName + "_solution_conflict_graph.gr");
             writeSolutionConflictGraph(facts, fds, dcs, minimalSolutionSets, graphPath);
@@ -1018,7 +1009,7 @@ public class Main {
                 ExactTW.main(new String[]{graphPath.toString(), treeDecompositionPath.toString(), "-acsd"});
                 int treewidth = readTw(treeDecompositionPath);
                 writeTw(treewidth, Path.of(OUT_DIR, baseName + "_treewidth.txt"));
-                System.out.println("Computed treewidth: " + treewidth);
+                System.out.println("Computed SCG treewidth: " + treewidth);
             } catch(Exception e) {
                 System.err.println("Error computing treewidth: " + e.getMessage());
             }
